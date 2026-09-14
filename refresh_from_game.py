@@ -40,7 +40,7 @@ with open(os.path.join(OUT, "manifest.js"), "w") as f:
 def scene_board(scene, name, var, out_name):
     text = open(os.path.join(GAME, "scenes", scene)).read()
     layers = {m.group(1): m.group(2) for m in re.finditer(
-        r'\[node name="(\w+)" type="TileMapLayer"[^\]]*\]\n(?:.*\n)*?tile_map_data = PackedByteArray\("([^"]*)"\)', text)}
+        r'\[node name="(\w+)" type="TileMapLayer"[^\]]*\]\n(?:(?!\[node ).*\n)*?tile_map_data = PackedByteArray\("([^"]*)"\)', text)}
     board = {"format": "tawboard/1", "name": name, "author": "Fred", "slot_w": 32, "layers": layers}
     with open(os.path.join(OUT, out_name), "w") as f:
         f.write("window.%s = " % var + json.dumps(board, separators=(",", ":")) + ";\n")

@@ -183,9 +183,12 @@
 <script>
 (() => {
 'use strict';
-const LAYERS = ['TileMapLayer', 'Decoration', 'Foreground', 'Signs'];
-const LAYER_LABEL = {TileMapLayer: 'Base', Decoration: 'Decoration', Foreground: 'Foreground', Signs: 'Signs'};
-const LAYER_Z = {TileMapLayer: -1, Decoration: -1, Foreground: 13, Signs: 13};
+// the six layers back to front, as the game draws them: four behind the
+// player, two in front (the names are the game's own node names)
+const LAYERS = ['TileMapLayer', 'Decoration', 'Background3', 'Background4', 'Foreground', 'Foreground2'];
+const LAYER_LABEL = {TileMapLayer: 'Background 1 (behind the player)', Decoration: 'Background 2 (behind the player)', Background3: 'Background 3 (behind the player)', Background4: 'Background 4 (behind the player)', Foreground: 'Foreground 1 (in front of the player)', Foreground2: 'Foreground 2 (in front of the player)'};
+const LAYER_Z = {TileMapLayer: -1, Decoration: -1, Background3: -1, Background4: -1, Foreground: 13, Foreground2: 13};
+const LAYER_ALIAS = {Signs: 'Foreground2'};  // older boards and scenes
 const SOURCE_LABEL = {0: 'Assets', 1: 'Lights', 2: 'Scaffold', 3: 'Ward lockers', 6: 'Med chest', 7: 'Backpack', 8: 'Lockers', 9: 'Padlocks', 10: 'Old facility'};
 const FLIP_H = 4096, FLIP_V = 8192, TRANSPOSE = 16384;
 // sheets the game keeps for its own purposes but nobody paints rooms from
@@ -257,7 +260,7 @@ function boardToDoc(b) {
 }
 function docToBoard(id, d) {
   const b = {id, name: d.name || id, author: d.author || '', place: d.place || (BUNDLED[id] ? BUNDLED[id].place : PLACES[0]), slotW: Number(d.slot_w) || 16, layers: {}, updatedAt: d.updatedAt || ''};
-  for (const L of LAYERS) b.layers[L] = decodeLayer(d.layers && d.layers[L]);
+  for (const L of LAYERS) b.layers[L] = decodeLayer(d.layers && (d.layers[L] || (Object.keys(LAYER_ALIAS).find(k => LAYER_ALIAS[k] === L) && d.layers[Object.keys(LAYER_ALIAS).find(k => LAYER_ALIAS[k] === L)])));
   return b;
 }
 function sceneText(b) {
@@ -281,7 +284,7 @@ function parseImport(text) {
   const layers = {};
   const re = /\[node name="(\w+)" type="TileMapLayer"[^\]]*\][^\[]*?tile_map_data = PackedByteArray\("([^"]*)"\)/g;
   let m, any = false;
-  while ((m = re.exec(text))) { if (LAYERS.includes(m[1])) { layers[m[1]] = m[2]; any = true; } }
+  while ((m = re.exec(text))) { const L = LAYER_ALIAS[m[1]] || m[1]; if (LAYERS.includes(L)) { layers[L] = m[2]; any = true; } }
   if (!any) throw new Error('no board layers found in that text');
   const nm = /\[node name="(\w+)" type="Node2D"\]/.exec(text);
   return {name: nm ? nm[1] : 'Imported board', layers};
@@ -949,7 +952,7 @@ window.addEventListener('keydown', ev => {
   else if (k === 'h') { state.flags ^= FLIP_H; syncFlags(); updateStampInfo(); render(); }
   else if (k === 'v') { state.flags ^= FLIP_V; syncFlags(); updateStampInfo(); render(); }
   else if (k === 't') { state.flags ^= TRANSPOSE; syncFlags(); updateStampInfo(); render(); }
-  else if (k >= '1' && k <= '4') { state.layer = LAYERS[Number(k) - 1]; renderLayers(); render(); }
+  else if (k >= '1' && k <= '6') { state.layer = LAYERS[Number(k) - 1]; renderLayers(); render(); }
   else if (k === '=' || k === '+') setZoom(ZOOMS[Math.min(ZOOMS.length - 1, ZOOMS.indexOf(state.zoom) + 1)]);
   else if (k === '-') setZoom(ZOOMS[Math.max(0, ZOOMS.indexOf(state.zoom) - 1)]);
   else return;

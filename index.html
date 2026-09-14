@@ -196,7 +196,11 @@ const ONLY_TILES = {'9': [[0, 1]]};
 // the board: 8 by 9 slots of 16 by 24 cells; the dealer splits slots between
 // columns 16k-2 and 16k-1 and rows 24k-10 and 24k-9
 const SLOT_ROWS = 9;
-const X0 = -1, Y0 = -9, COLS = 129, ROWS = 24 * SLOT_ROWS;
+// a board's boxes are 16 cells wide unless it was made wider (24 or 32)
+const SLOT_WIDTHS = [16, 24, 32];
+const X0 = -1, Y0 = -9, ROWS = 24 * SLOT_ROWS;
+function slotW() { return state.cur && state.cur.slotW ? state.cur.slotW : 16; }
+function boardCols() { return 8 * slotW() + 1; }
 const ZOOMS = [2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256];
 // THE PLACES a level can be: one page of boards each. Add a name here to add a page.
 const PLACES = ['Hospital', 'Police station', 'Construction site', 'Military base', "Willbee's", 'School', 'Port', 'Housing', 'Tutorial'];
@@ -249,10 +253,10 @@ function boardToDoc(b) {
   const layers = {};
   let n = 0;
   for (const L of LAYERS) { layers[L] = encodeLayer(b.layers[L]); n += b.layers[L].size; }
-  return {format: 'tawboard/1', name: b.name, author: b.author, place: b.place || PLACES[0], layers, cells: n, updatedAt: new Date().toISOString()};
+  return {format: 'tawboard/1', name: b.name, author: b.author, place: b.place || PLACES[0], slot_w: b.slotW || 16, layers, cells: n, updatedAt: new Date().toISOString()};
 }
 function docToBoard(id, d) {
-  const b = {id, name: d.name || id, author: d.author || '', place: d.place || (BUNDLED[id] ? BUNDLED[id].place : PLACES[0]), layers: {}, updatedAt: d.updatedAt || ''};
+  const b = {id, name: d.name || id, author: d.author || '', place: d.place || (BUNDLED[id] ? BUNDLED[id].place : PLACES[0]), slotW: Number(d.slot_w) || 16, layers: {}, updatedAt: d.updatedAt || ''};
   for (const L of LAYERS) b.layers[L] = decodeLayer(d.layers && d.layers[L]);
   return b;
 }
@@ -263,7 +267,7 @@ function sceneText(b) {
     t += `[node name="${L}" type="TileMapLayer" parent="."]\nz_index = ${LAYER_Z[L]}\ntile_map_data = PackedByteArray("${encodeLayer(b.layers[L])}")\ntile_set = ExtResource("1_tileset")\n\n`;
   }
   for (let i = 0; i < 8 * SLOT_ROWS; i++) {
-    t += `[node name="Room${i + 1}" type="Marker2D" parent="."]\nposition = Vector2(${(i % 8) * 1024}, ${-448 + Math.floor(i / 8) * 1536})\n\n`;
+    t += `[node name="Room${i + 1}" type="Marker2D" parent="."]\nposition = Vector2(${(i % 8) * (b.slotW || 16) * 64}, ${-448 + Math.floor(i / 8) * 1536})\n\n`;
   }
   return t;
 }
@@ -272,7 +276,7 @@ function parseImport(text) {
   if (text.startsWith('{')) {
     const d = JSON.parse(text);
     if (!d.layers) throw new Error('that JSON has no layers');
-    return {name: d.name || 'Imported board', layers: d.layers};
+    return {name: d.name || 'Imported board', layers: d.layers, slotW: Number(d.slot_w) || 16};
   }
   const layers = {};
   const re = /\[node name="(\w+)" type="TileMapLayer"[^\]]*\][^\[]*?tile_map_data = PackedByteArray\("([^"]*)"\)/g;
@@ -424,6 +428,7 @@ function paintBoard() {
   const z = state.zoom;
   const spacer = $('spacer');
   const rowsShown = boardRows();
+  const COLS = boardCols(), sw = slotW();
   spacer.style.width = (COLS * z) + 'px'; spacer.style.height = (rowsShown * 24 * z) + 'px';
   const vw = Math.min(els.wrap.clientWidth, COLS * z), vh = Math.min(els.wrap.clientHeight, rowsShown * 24 * z);
   if (els.board.width !== vw || els.board.height !== vh) { els.board.width = vw; els.board.height = vh; }
@@ -455,8 +460,8 @@ function paintBoard() {
   ctx.fillStyle = 'rgba(158,240,128,.55)'; ctx.font = `${Math.max(9, z)}px "IBM Plex Mono", monospace`; ctx.textBaseline = 'top';
   for (const sk of used) {
     const [sx, sy] = sk.split(',').map(Number);
-    const x = (16 * sx - 1 - X0) * z + .5, y = (24 * sy - 9 - Y0) * z + .5;
-    ctx.strokeRect(x, y, 16 * z, 24 * z);
+    const x = (sw * sx - 1 - X0) * z + .5, y = (24 * sy - 9 - Y0) * z + .5;
+    ctx.strokeRect(x, y, sw * z, 24 * z);
     if (z >= 6) ctx.fillText('Room ' + (sy * 8 + sx + 1), x + 2, y + 2);
   }
   ctx.setLineDash([]);
@@ -552,7 +557,7 @@ window.addEventListener('mouseup', ev => {
 
 // ---------- editing ----------
 function key(x, y) { return x + ',' + y; }
-function slotOf(x, y) { return Math.min(7, Math.max(0, Math.round((x - 6.5) / 16))) + ',' + Math.min(SLOT_ROWS - 1, Math.max(0, Math.round((y - 2.5) / 24))); }
+function slotOf(x, y) { const sw = slotW(); return Math.min(7, Math.max(0, Math.round((x - (sw / 2 - 1.5)) / sw))) + ',' + Math.min(SLOT_ROWS - 1, Math.max(0, Math.round((y - 2.5) / 24))); }
 function cellAt(ev) {
   const r = els.board.getBoundingClientRect();
   const [ox, oy] = viewOrigin();
@@ -628,7 +633,7 @@ els.board.addEventListener('mousedown', ev => {
 els.board.addEventListener('mousemove', ev => {
   const c = cellAt(ev);
   state.hover = c;
-  const sx = Math.min(7, Math.max(0, Math.round((c.x - 6.5) / 16))), sy = Math.min(SLOT_ROWS - 1, Math.max(0, Math.round((c.y - 2.5) / 24)));
+  const [sx, sy] = slotOf(c.x, c.y).split(',').map(Number);
   const t = state.cur ? state.cur.layers[state.layer].get(key(c.x, c.y)) : null;
   els.coord.textContent = `cell ${c.x}, ${c.y}  ·  Room ${sy * 8 + sx + 1}` + (t ? `  ·  ${sourceName(String(t[0]))} (${t[1]}, ${t[2]})` : '');
   if (state.stroke) strokeTo(c); else render();
@@ -663,6 +668,7 @@ function renderBoards() {
     const by = document.createElement('span'); by.className = 'by'; by.textContent = m.author ? 'by ' + m.author : '';
     d.append(nm, by);
     if (BUNDLED[id]) { const p = document.createElement('span'); p.className = 'pill'; p.textContent = 'the game\'s'; d.appendChild(p); }
+    if (m.slotW && m.slotW !== 16) { const p = document.createElement('span'); p.className = 'pill'; p.textContent = m.slotW + ' wide'; d.appendChild(p); }
     if (m.busy) { const p = document.createElement('span'); p.className = 'pill lock'; p.textContent = 'in use'; d.appendChild(p); }
     d.addEventListener('click', () => openBoard(id));
     els.boards.appendChild(d);
@@ -675,7 +681,7 @@ let toastT = 0;
 function toast(msg) { els.toast.textContent = msg; els.toast.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => els.toast.classList.remove('show'), 2600); }
 
 // ---------- boards: open / new / save ----------
-function blankBoard(id, name, author) { const b = {id, name, author, place: state.place, layers: {}, updatedAt: ''}; for (const L of LAYERS) b.layers[L] = new Map(); return b; }
+function blankBoard(id, name, author, slotW) { const b = {id, name, author, place: state.place, slotW: slotW || 16, layers: {}, updatedAt: ''}; for (const L of LAYERS) b.layers[L] = new Map(); return b; }
 function slug(name) { return (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'board') + '-' + Math.random().toString(36).slice(2, 6); }
 async function openBoard(id) {
   await flushSave();
@@ -700,8 +706,10 @@ async function newBoard(from) {
   const author = els.authorName.value.trim() || 'someone';
   const name = prompt('Name the new board', from ? from.name + ' copy' : author + "'s rooms");
   if (!name) return;
+  let sw = from ? (from.slotW || 16) : Number(prompt('Box width in cells: 16, 24 or 32', '16'));
+  if (!SLOT_WIDTHS.includes(sw)) { toast('the box width must be 16, 24 or 32'); return; }
   const id = slug(name);
-  const b = blankBoard(id, name.trim(), author);
+  const b = blankBoard(id, name.trim(), author, sw);
   if (from) for (const L of LAYERS) b.layers[L] = new Map(from.layers[L]);
   releaseLease();
   state.cur = b; state.readOnly = false; state.undo = []; state.redo = [];
@@ -736,7 +744,7 @@ async function saveNow() {
   if (!state.cur || state.readOnly) return;
   state.dirty = false;
   const doc = boardToDoc(state.cur);
-  state.boards.set(state.cur.id, {...(state.boards.get(state.cur.id) || {}), name: doc.name, author: doc.author, place: doc.place, updatedAt: doc.updatedAt, cells: doc.cells});
+  state.boards.set(state.cur.id, {...(state.boards.get(state.cur.id) || {}), name: doc.name, author: doc.author, place: doc.place, slotW: doc.slot_w, updatedAt: doc.updatedAt, cells: doc.cells});
   try {
     setStatus('saving…', '');
     await storeDoc(state.cur.id, doc);
@@ -794,7 +802,7 @@ function onStoreChange(docs) {
   for (const d of docs) {
     const m = d.data || {};
     seen.add(d.id);
-    state.boards.set(d.id, {...(state.boards.get(d.id) || {}), name: m.name, author: m.author, place: m.place, updatedAt: m.updatedAt, cells: m.cells});
+    state.boards.set(d.id, {...(state.boards.get(d.id) || {}), name: m.name, author: m.author, place: m.place, slotW: Number(m.slot_w) || 16, updatedAt: m.updatedAt, cells: m.cells});
     // another editor's live changes to the board we are only reading
     if (state.cur && state.cur.id === d.id && state.readOnly && !d.pending) {
       const b = docToBoard(d.id, m); state.cur.layers = b.layers; state.cur.name = b.name; els.boardName.value = b.name; render(); renderLayers();
@@ -827,7 +835,7 @@ $('btnCopyScene').addEventListener('click', async () => {
 $('btnImport').addEventListener('click', async () => {
   let parsed;
   try { parsed = parseImport(els.importText.value); } catch (e) { toast(e.message); return; }
-  const b = blankBoard('tmp', parsed.name, els.authorName.value.trim());
+  const b = blankBoard('tmp', parsed.name, els.authorName.value.trim(), parsed.slotW || 16);
   for (const L of LAYERS) b.layers[L] = decodeLayer(parsed.layers[L]);
   await newBoard(b);
   els.importText.value = '';

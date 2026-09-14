@@ -196,6 +196,8 @@ const HIDDEN_SOURCES = ['2', '10'];
 // sheets where only some cells are for painting: the padlock's shut face -
 // the game swaps in its sprung face and the two silhouettes itself
 const ONLY_TILES = {'9': [[0, 1]]};
+// cells never offered: the sheet's stray second lit EXIT face (the sign lives at 22,26 / 23,26)
+const EXCLUDE_TILES = {'0': [[16, 18]]};
 // the board: 8 by 9 slots of 16 by 24 cells; the dealer splits slots between
 // columns 16k-2 and 16k-1 and rows 24k-10 and 24k-9
 const SLOT_ROWS = 9;
@@ -313,7 +315,8 @@ let sourceIds = Object.keys(TILESET.sources);
 function sourceName(sid) { const s = TILESET.sources[sid]; return (s && s.name) || SOURCE_LABEL[sid] || ('Sheet ' + sid); }
 function loadSource(sid, onDone) {
   const s = TILESET.sources[sid];
-  tileSet[sid] = new Set((ONLY_TILES[sid] || s.tiles).map(t => t[0] + ',' + t[1]));
+  const ex = new Set((EXCLUDE_TILES[sid] || []).map(t => t[0] + ',' + t[1]));
+  tileSet[sid] = new Set((ONLY_TILES[sid] || s.tiles).map(t => t[0] + ',' + t[1]).filter(k => !ex.has(k)));
   const img = new Image();
   img.onload = () => { render(); renderPalette(); if (onDone) onDone(true); };
   img.onerror = () => { setStatus('a tile sheet failed to load', 'bad'); if (onDone) onDone(false); };

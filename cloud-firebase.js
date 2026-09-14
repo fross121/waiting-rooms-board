@@ -49,6 +49,25 @@
         return true;
       },
       release() { clearInterval(leaseTimer); leaseTimer = 0; },
+      // the artist's sheets: a document of metadata, the PNG in chunks below it
+      async listSheets() {
+        const snap = await db.collection('sheets').get();
+        const out = [];
+        for (const d of snap.docs) {
+          const m = d.data();
+          const ch = await d.ref.collection('chunks').orderBy('n').get();
+          out.push({id: d.id, meta: {name: m.name, region: m.region, tiles: m.tiles, width: m.width, height: m.height}, png: ch.docs.map(c => c.data().data).join('')});
+        }
+        return out;
+      },
+      async saveSheet(sid, src) {
+        const CH = 700000;
+        const ref = db.collection('sheets').doc(String(sid));
+        const old = await ref.collection('chunks').get();
+        for (const c of old.docs) await c.ref.delete();
+        for (let i = 0, n = 0; i < src.png.length; i += CH, n++) await ref.collection('chunks').doc('c' + String(n).padStart(3, '0')).set({n, data: src.png.slice(i, i + CH)});
+        await ref.set({name: src.name || '', region: src.region, tiles: src.tiles, width: src.width, height: src.height, updatedAt: new Date().toISOString()});
+      },
       async download(filename, text) {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([text], {type: 'application/json'})); a.download = filename;

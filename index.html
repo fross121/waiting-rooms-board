@@ -138,6 +138,12 @@
     <section>
       <h2>Tile sheet</h2>
       <div id="tabs" class="tabs"></div>
+      <div class="row wrap" style="margin-bottom:8px">
+        <button id="btnAddSheet">Add sheet</button>
+        <button id="btnReplaceSheet">Replace this sheet</button>
+        <button id="btnSheetsDownload">Download sheets for the game</button>
+        <input id="sheetFile" type="file" accept="image/png" hidden>
+      </div>
       <div class="palWrap" id="palWrap"><canvas id="palette" width="10" height="10"></canvas></div>
       <div class="stampBox">
         <canvas id="stampPreview" width="64" height="64"></canvas>
@@ -182,6 +188,11 @@ const LAYER_LABEL = {TileMapLayer: 'Base', Decoration: 'Decoration', Foreground:
 const LAYER_Z = {TileMapLayer: -1, Decoration: -1, Foreground: 13, Signs: 13};
 const SOURCE_LABEL = {0: 'Assets', 1: 'Lights', 2: 'Scaffold', 3: 'Ward lockers', 6: 'Med chest', 7: 'Backpack', 8: 'Lockers', 9: 'Padlocks', 10: 'Old facility'};
 const FLIP_H = 4096, FLIP_V = 8192, TRANSPOSE = 16384;
+// sheets the game keeps for its own purposes but nobody paints rooms from
+const HIDDEN_SOURCES = ['2', '10'];
+// sheets where only some cells are for painting: the padlock's shut face -
+// the game swaps in its sprung face and the two silhouettes itself
+const ONLY_TILES = {'9': [[0, 1]]};
 // the board: 8 by 9 slots of 16 by 24 cells; the dealer splits slots between
 // columns 16k-2 and 16k-1 and rows 24k-10 and 24k-9
 const SLOT_ROWS = 9;
@@ -290,17 +301,93 @@ els.authorName.addEventListener('change', () => { try { localStorage.setItem('ta
 
 // ---------- images ----------
 const images = {};
-let loaded = 0;
-const sourceIds = Object.keys(TILESET.sources);
-for (const sid of sourceIds) {
+const tileSet = {};
+let sourceIds = Object.keys(TILESET.sources);
+function sourceName(sid) { const s = TILESET.sources[sid]; return (s && s.name) || SOURCE_LABEL[sid] || ('Sheet ' + sid); }
+function loadSource(sid, onDone) {
+  const s = TILESET.sources[sid];
+  tileSet[sid] = new Set((ONLY_TILES[sid] || s.tiles).map(t => t[0] + ',' + t[1]));
   const img = new Image();
-  img.onload = () => { loaded++; if (loaded === sourceIds.length) { setStatus('tiles ready', ''); } render(); renderPalette(); };
-  img.onerror = () => { loaded++; setStatus('a tile sheet failed to load', 'bad'); };
-  img.src = TILESET.sources[sid].file;
+  img.onload = () => { render(); renderPalette(); if (onDone) onDone(true); };
+  img.onerror = () => { setStatus('a tile sheet failed to load', 'bad'); if (onDone) onDone(false); };
+  img.src = s.png ? 'data:image/png;base64,' + s.png : s.file;
   images[sid] = img;
 }
-const tileSet = {};
-for (const sid of sourceIds) tileSet[sid] = new Set(TILESET.sources[sid].tiles.map(t => t[0] + ',' + t[1]));
+let loaded = 0;
+for (const sid of sourceIds) loadSource(sid, () => { loaded++; if (loaded === sourceIds.length) setStatus('tiles ready', ''); });
+
+// ---------- the artist's sheets: add a new one, or replace one in place ----------
+// A sheet is cut into cells of one size; every cell with any paint in it is a
+// tile. New sheets take the next free source id (never the game's own 0-10,
+// nor 40, which the game bakes into).
+function nextSourceId() { let id = 11; while (TILESET.sources[String(id)] || id === 40) id++; return String(id); }
+function fileToImage(file) {
+  return new Promise((ok, bad) => {
+    const r = new FileReader();
+    r.onload = () => { const img = new Image(); img.onload = () => ok({img, b64: String(r.result).split(',')[1]}); img.onerror = () => bad(new Error('not a readable PNG')); img.src = String(r.result); };
+    r.onerror = () => bad(new Error('could not read the file')); r.readAsDataURL(file);
+  });
+}
+function scanTiles(img, rw, rh) {
+  const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+  const d = x.getImageData(0, 0, c.width, c.height).data;
+  const tiles = [];
+  for (let ty = 0; ty * rh + rh <= c.height; ty++) for (let tx = 0; tx * rw + rw <= c.width; tx++) {
+    let any = false;
+    for (let y = ty * rh; y < ty * rh + rh && !any; y++) for (let px = tx * rw; px < tx * rw + rw; px++) if (d[(y * c.width + px) * 4 + 3] > 0) { any = true; break; }
+    if (any) tiles.push([tx, ty]);
+  }
+  return tiles;
+}
+async function installSheet(sid, meta, b64, persist) {
+  TILESET.sources[sid] = Object.assign({}, TILESET.sources[sid] || {}, meta, {png: b64, custom: true});
+  if (!sourceIds.includes(sid)) sourceIds.push(sid);
+  await new Promise(ok => loadSource(sid, ok));
+  buildTabs(); renderPalette(); render();
+  if (persist) {
+    try { await store.saveSheet(sid, TILESET.sources[sid]); setStatus((store.cloud ? 'sheet saved to the cloud' : 'sheet saved in this browser'), 'ok'); }
+    catch (e) { setStatus('could not save the sheet: ' + ((e && e.message) || 'too big?'), 'bad'); }
+  }
+}
+let sheetMode = 'add';
+$('btnAddSheet').addEventListener('click', () => { sheetMode = 'add'; $('sheetFile').value = ''; $('sheetFile').click(); });
+$('btnReplaceSheet').addEventListener('click', () => { sheetMode = 'replace'; $('sheetFile').value = ''; $('sheetFile').click(); });
+$('sheetFile').addEventListener('change', async () => {
+  const f = $('sheetFile').files[0]; if (!f) return;
+  let loadedImg;
+  try { loadedImg = await fileToImage(f); } catch (e) { toast(e.message); return; }
+  const {img, b64} = loadedImg;
+  if (sheetMode === 'add') {
+    const name = prompt('Name the sheet', f.name.replace(/\.png$/i, ''));
+    if (!name) return;
+    const size = Number(prompt('Cell size in pixels (64 for the game\'s tiles)', '64'));
+    if (!(size > 0)) return;
+    const sid = nextSourceId();
+    await installSheet(sid, {name: name.trim(), region: [size, size], tiles: scanTiles(img, size, size), width: img.naturalWidth, height: img.naturalHeight}, b64, true);
+    state.source = sid; buildTabs(); renderPalette();
+    toast('added "' + name.trim() + '" as sheet ' + sid);
+  } else {
+    const sid = state.source, cur = TILESET.sources[sid];
+    const [rw, rh] = cur.region;
+    if (!confirm('Replace the art of "' + sourceName(sid) + '" with ' + f.name + '? Rooms painted from it keep their cells and show the new art.')) return;
+    await installSheet(sid, {region: [rw, rh], tiles: scanTiles(img, rw, rh), width: img.naturalWidth, height: img.naturalHeight, name: cur.name || SOURCE_LABEL[sid]}, b64, true);
+    toast('replaced the art of ' + sourceName(sid));
+  }
+});
+$('btnSheetsDownload').addEventListener('click', async () => {
+  const out = {format: 'tawsheets/1', sheets: {}};
+  for (const sid of sourceIds) { const s = TILESET.sources[sid]; if (s.custom) out.sheets[sid] = {name: s.name || SOURCE_LABEL[sid] || ('sheet ' + sid), region: s.region, width: s.width, height: s.height, tiles: s.tiles, png: s.png}; }
+  if (!Object.keys(out.sheets).length) { toast('no added or replaced sheets to download'); return; }
+  try { toast(await store.download('sheets.json', JSON.stringify(out))); }
+  catch (e) { if (!(e && e.code === 'declined')) toast('could not save the file: ' + ((e && e.message) || 'unavailable')); }
+});
+async function loadCustomSheets() {
+  let sheets = [];
+  try { sheets = await store.listSheets(); } catch (e) { return; }
+  for (const sh of sheets) await installSheet(String(sh.id), sh.meta, sh.png, false);
+  if (sheets.length) buildTabs();
+}
 
 // ---------- drawing one tile ----------
 function drawTile(c, sid, ax, ay, alt, dx, dy, z) {
@@ -393,10 +480,12 @@ function paintBoard() {
 let PAL_SCALE = 0.5;
 function buildTabs() {
   els.tabs.innerHTML = '';
+  if (HIDDEN_SOURCES.includes(state.source)) state.source = '0';
   for (const sid of sourceIds) {
+    if (HIDDEN_SOURCES.includes(sid)) continue;
     const b = document.createElement('button');
     b.className = 'tab' + (sid === state.source ? ' on' : '');
-    b.textContent = SOURCE_LABEL[sid] || ('Source ' + sid);
+    b.textContent = sourceName(sid);
     b.addEventListener('click', () => { state.source = sid; buildTabs(); renderPalette(); });
     els.tabs.appendChild(b);
   }
@@ -452,7 +541,7 @@ function updateStampInfo() {
   const z = Math.floor(64 / Math.max(st.w, st.h));
   for (const [dx, dy, s, ax, ay] of st.cells) drawTile(c, String(s), ax, ay, state.flags, dx * z, dy * z, z);
   const f = [(state.flags & FLIP_H) ? 'flipped' : '', (state.flags & FLIP_V) ? 'upside down' : '', (state.flags & TRANSPOSE) ? 'turned' : ''].filter(Boolean).join(', ');
-  els.stampInfo.innerHTML = `<b>${SOURCE_LABEL[st.src] || 'Source ' + st.src}</b> ${st.w}×${st.h} at (${st.ax0}, ${st.ay0})${f ? '<br>' + f : ''}`;
+  els.stampInfo.innerHTML = `<b>${sourceName(st.src)}</b> ${st.w}×${st.h} at (${st.ax0}, ${st.ay0})${f ? '<br>' + f : ''}`;
 }
 els.palette.addEventListener('mousedown', ev => { if (ev.button !== 0) return; const [x, y] = palCell(ev); palSel = [x, y, x, y]; renderPalette(); ev.preventDefault(); });
 els.palette.addEventListener('mousemove', ev => { if (!palSel) return; const [x, y] = palCell(ev); palSel[2] = x; palSel[3] = y; renderPalette(); });
@@ -541,7 +630,7 @@ els.board.addEventListener('mousemove', ev => {
   state.hover = c;
   const sx = Math.min(7, Math.max(0, Math.round((c.x - 6.5) / 16))), sy = Math.min(SLOT_ROWS - 1, Math.max(0, Math.round((c.y - 2.5) / 24)));
   const t = state.cur ? state.cur.layers[state.layer].get(key(c.x, c.y)) : null;
-  els.coord.textContent = `cell ${c.x}, ${c.y}  ·  Room ${sy * 8 + sx + 1}` + (t ? `  ·  ${SOURCE_LABEL[t[0]] || 'src ' + t[0]} (${t[1]}, ${t[2]})` : '');
+  els.coord.textContent = `cell ${c.x}, ${c.y}  ·  Room ${sy * 8 + sx + 1}` + (t ? `  ·  ${sourceName(String(t[0]))} (${t[1]}, ${t[2]})` : '');
   if (state.stroke) strokeTo(c); else render();
 });
 els.board.addEventListener('mouseleave', () => { state.hover = null; render(); });
@@ -677,6 +766,15 @@ const localStore = {
   async save(id, doc) { const all = lsRead(); all[id] = doc; lsWrite(all); this._notify(); },
   async remove(id) { const all = lsRead(); delete all[id]; lsWrite(all); this._notify(); },
   async lease() { return true; }, release() {},
+  async listSheets() {
+    let all = {}; try { all = JSON.parse(localStorage.getItem('taw_sheets_v1') || '{}'); } catch (e) {}
+    return Object.entries(all).map(([id, v]) => ({id, meta: v.meta, png: v.png}));
+  },
+  async saveSheet(sid, src) {
+    let all = {}; try { all = JSON.parse(localStorage.getItem('taw_sheets_v1') || '{}'); } catch (e) {}
+    all[sid] = {meta: {name: src.name, region: src.region, tiles: src.tiles, width: src.width, height: src.height}, png: src.png};
+    try { localStorage.setItem('taw_sheets_v1', JSON.stringify(all)); } catch (e) { throw new Error('this browser has no room for it'); }
+  },
   async download(filename, text) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([text], {type: 'application/json'})); a.download = filename;
@@ -887,6 +985,7 @@ window.BOARD_CURRENT_ID = () => (state.cur ? state.cur.id : null);
   }
   els.cloudNote.hidden = !!store.cloud;
   store.list(onStoreChange, e => setStatus('the board list is unavailable (' + ((e && e.code) || 'error') + ')', 'bad'));
+  await loadCustomSheets();
   const restore = store.restoreId;
   if (restore && restore !== MAIN_ID) openBoard(restore);
   else openBoard(MAIN_ID);

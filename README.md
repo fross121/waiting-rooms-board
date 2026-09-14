@@ -28,17 +28,34 @@ board at a time.
        rules_version = '2';
        service cloud.firestore {
          match /databases/{database}/documents {
-           match /boards/{board} {
+           match /{document=**} {
              allow read, write: if true;
            }
          }
        }
 
    and publish them. This lets anyone who has the site's address read and
-   change the boards, which is the point for a shared editor; keep the
-   address among the people who should have it.
+   change the boards and sheets, which is the point for a shared editor; keep
+   the address among the people who should have it.
 4. Project settings (the cog), Your apps, add a **Web** app, and copy the
    `firebaseConfig` object it shows.
 5. Paste it into `firebase-config.js` in place of `null` and push the site.
 
 The page then says "saved to the cloud" after each change.
+
+## The artist's sheets
+
+**Add sheet** turns a PNG into a new tile sheet (every cell with paint in it
+is a tile), and **Replace this sheet** swaps the art of the sheet on show for
+a new PNG, in place, so rooms already painted from it show the new art. Both
+are saved with the boards.
+
+To put that art into the game, **Download sheets for the game** saves
+`sheets.json`; in the game repository run
+
+    python3 tools/import_sheets.py sheets.json
+
+which writes the PNGs into the project and adds or refreshes the tileset's
+sources. Open the project in Godot once so it imports the images, then run
+`python3 tools/board_editor_data.py` and push the site so the editor ships
+the new art as well.

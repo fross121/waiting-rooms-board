@@ -53,10 +53,12 @@
   .layerRow .z { font-family: var(--mono); font-size: 10px; color: var(--muted); text-align: right; }
   .tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
   .tools button { padding: 6px 4px; font-size: 12px; }
+  .tools select { background: var(--bg); border: 1px solid var(--line2); border-radius: 4px; padding: 4px 6px; font-family: var(--mono); font-size: 12px; }
   .tools button kbd { display: block; font-family: var(--mono); font-size: 10px; color: var(--muted); }
   .canvasWrap { position: relative; overflow: auto; background: #000; }
-  #board { display: block; image-rendering: pixelated; cursor: crosshair; }
-  .coord { position: sticky; left: 0; bottom: 0; font-family: var(--mono); font-size: 11px; color: var(--muted); background: rgba(20,22,28,.85); padding: 3px 8px; width: max-content; }
+  #board { display: block; image-rendering: pixelated; cursor: crosshair; position: sticky; top: 0; left: 0; z-index: 1; }
+  #spacer { position: absolute; left: 0; top: 0; width: 1px; height: 1px; }
+  .coord { position: sticky; left: 0; bottom: 0; z-index: 2; font-family: var(--mono); font-size: 11px; color: var(--muted); background: rgba(20,22,28,.85); padding: 3px 8px; width: max-content; }
   .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
   .tab { font-size: 12px; padding: 4px 8px; border: 1px solid var(--line2); border-radius: 4px; background: var(--bg); cursor: pointer; }
   .tab.on { border-color: var(--accent); color: var(--accent); }
@@ -111,12 +113,14 @@
         <button id="toolPick">Pick<kbd>I</kbd></button>
         <button id="btnUndo">Undo<kbd>Ctrl Z</kbd></button>
         <button id="btnRedo">Redo<kbd>Ctrl Y</kbd></button>
-        <button id="btnZoom">Zoom<kbd id="zoomLabel">8 px</kbd></button>
+        <label class="row" style="grid-column: span 3; justify-content: space-between">Zoom <select id="zoomSel"></select></label>
+        <label class="row" style="grid-column: span 3; justify-content: space-between">Tile sheet <select id="palSel"><option value="0.25">¼</option><option value="0.34">⅓</option><option value="0.5" selected>½</option><option value="0.75">¾</option><option value="1">1×</option><option value="1.5">1½×</option><option value="2">2×</option><option value="3">3×</option></select></label>
       </div>
     </section>
   </aside>
 
   <div class="canvasWrap" id="canvasWrap">
+    <div id="spacer"></div>
     <canvas id="board" width="10" height="10"></canvas>
     <div class="coord" id="coord">–</div>
   </div>
@@ -171,7 +175,7 @@ const FLIP_H = 4096, FLIP_V = 8192, TRANSPOSE = 16384;
 // columns 16k-2 and 16k-1 and rows 24k-10 and 24k-9
 const SLOT_ROWS = 9;
 const X0 = -1, Y0 = -9, COLS = 129, ROWS = 24 * SLOT_ROWS;
-const ZOOMS = [4, 6, 8, 12, 16];
+const ZOOMS = [2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256];
 // THE PLACES a level can be: one page of boards each. Add a name here to add a page.
 const PLACES = ['Hospital', 'Police station', 'Construction site', 'Military base', "Willbee's", 'School', 'Port', 'Housing', 'Tutorial'];
 // the game's own boards, shipped with the page: shown on their page until someone saves a change to them
@@ -184,7 +188,7 @@ const els = {
   board: $('board'), wrap: $('canvasWrap'), coord: $('coord'), palette: $('palette'), palWrap: $('palWrap'),
   tabs: $('tabs'), stampPreview: $('stampPreview'), stampInfo: $('stampInfo'), boards: $('boards'), layers: $('layers'),
   status: $('status'), boardName: $('boardName'), authorName: $('authorName'), toast: $('toast'), cloudNote: $('cloudNote'),
-  importText: $('importText'), dimOthers: $('dimOthers'), zoomLabel: $('zoomLabel'),
+  importText: $('importText'), dimOthers: $('dimOthers'),
 };
 const ctx = els.board.getContext('2d');
 const pctx = els.palette.getContext('2d');
@@ -305,11 +309,24 @@ function drawTile(c, sid, ax, ay, alt, dx, dy, z) {
 // ---------- the board canvas ----------
 let renderQueued = false;
 function render() { if (!renderQueued) { renderQueued = true; requestAnimationFrame(() => { renderQueued = false; paintBoard(); }); } }
+// The canvas is only as big as the view; the spacer gives the wrap its
+// scroll size, and everything is drawn shifted by the scroll, so the
+// board can be zoomed far past what one canvas the size of the whole
+// board could hold.
+function viewOrigin() { return [els.wrap.scrollLeft, els.wrap.scrollTop]; }
 function paintBoard() {
   const z = state.zoom;
-  els.board.width = COLS * z; els.board.height = ROWS * z;
+  const spacer = $('spacer');
+  spacer.style.width = (COLS * z) + 'px'; spacer.style.height = (ROWS * z) + 'px';
+  const vw = Math.min(els.wrap.clientWidth, COLS * z), vh = Math.min(els.wrap.clientHeight, ROWS * z);
+  if (els.board.width !== vw || els.board.height !== vh) { els.board.width = vw; els.board.height = vh; }
+  const [ox, oy] = viewOrigin();
   ctx.imageSmoothingEnabled = false;
-  ctx.clearRect(0, 0, els.board.width, els.board.height);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, vw, vh);
+  ctx.translate(-ox, -oy);
+  const x0c = Math.floor(ox / z) + X0 - 2, x1c = Math.ceil((ox + vw) / z) + X0 + 2;
+  const y0c = Math.floor(oy / z) + Y0 - 2, y1c = Math.ceil((oy + vh) / z) + Y0 + 2;
   const b = state.cur;
   if (b) {
     for (const L of LAYERS) {
@@ -317,6 +334,7 @@ function paintBoard() {
       ctx.globalAlpha = (els.dimOthers.checked && L !== state.layer) ? 0.42 : 1;
       for (const [k, t] of b.layers[L]) {
         const [x, y] = k.split(',').map(Number);
+        if (x < x0c || x > x1c || y < y0c || y > y1c) continue;
         drawTile(ctx, String(t[0]), t[1], t[2], t[3], (x - X0) * z, (y - Y0) * z, z);
       }
     }
@@ -352,7 +370,7 @@ function paintBoard() {
 }
 
 // ---------- the palette ----------
-const PAL_SCALE = 0.5;
+let PAL_SCALE = 0.5;
 function buildTabs() {
   els.tabs.innerHTML = '';
   for (const sid of sourceIds) {
@@ -428,7 +446,8 @@ function key(x, y) { return x + ',' + y; }
 function slotOf(x, y) { return Math.min(7, Math.max(0, Math.round((x - 6.5) / 16))) + ',' + Math.min(SLOT_ROWS - 1, Math.max(0, Math.round((y - 2.5) / 24))); }
 function cellAt(ev) {
   const r = els.board.getBoundingClientRect();
-  return {x: Math.floor((ev.clientX - r.left) / state.zoom) + X0, y: Math.floor((ev.clientY - r.top) / state.zoom) + Y0};
+  const [ox, oy] = viewOrigin();
+  return {x: Math.floor((ev.clientX - r.left + ox) / state.zoom) + X0, y: Math.floor((ev.clientY - r.top + oy) / state.zoom) + Y0};
 }
 function setCell(L, x, y, t) {
   const m = state.cur.layers[L], k = key(x, y);
@@ -526,8 +545,7 @@ function renderLayers() {
 }
 function renderBoards() {
   els.boards.innerHTML = '';
-  const items = [...state.boards.entries()].filter(([id, m]) => (m.place || (BUNDLED[id] ? BUNDLED[id].place : PLACES[0])) === state.place)
-    .sort((a, b) => (BUNDLED[a[0]] ? -1 : BUNDLED[b[0]] ? 1 : (b[1].updatedAt || '').localeCompare(a[1].updatedAt || '')));
+  const items = placeBoards(state.place);
   if (!items.length) { const e = document.createElement('p'); e.className = 'help'; e.textContent = 'No boards yet.'; els.boards.appendChild(e); }
   for (const [id, m] of items) {
     const d = document.createElement('div');
@@ -614,6 +632,7 @@ async function saveNow() {
     setStatus('saving…', '');
     await storeDoc(state.cur.id, doc);
     setStatus((store.cloud ? 'saved to the cloud ' : 'saved in this browser ') + new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}), 'ok');
+    $('btnDelete').disabled = false;
   } catch (e) {
     state.dirty = true;
     setStatus('could not save: ' + (e && e.code === 'quota_exceeded' ? 'the store is full - delete an old board' : (e && e.message) || 'try again'), 'bad');
@@ -704,9 +723,21 @@ $('btnUndo').addEventListener('click', undo); $('btnRedo').addEventListener('cli
 $('flagH').addEventListener('click', () => { state.flags ^= FLIP_H; syncFlags(); updateStampInfo(); render(); });
 $('flagV').addEventListener('click', () => { state.flags ^= FLIP_V; syncFlags(); updateStampInfo(); render(); });
 $('flagT').addEventListener('click', () => { state.flags ^= TRANSPOSE; syncFlags(); updateStampInfo(); render(); });
-function setZoom(z) { state.zoom = z; els.zoomLabel.textContent = z + ' px'; render(); }
-$('btnZoom').addEventListener('click', () => setZoom(ZOOMS[(ZOOMS.indexOf(state.zoom) + 1) % ZOOMS.length]));
+function setZoom(z) {
+  // keep the middle of the view on the same cell
+  const [ox, oy] = viewOrigin();
+  const cx = (ox + els.board.width / 2) / state.zoom, cy = (oy + els.board.height / 2) / state.zoom;
+  state.zoom = z; $('zoomSel').value = String(z);
+  paintBoard();
+  els.wrap.scrollLeft = cx * z - els.board.width / 2; els.wrap.scrollTop = cy * z - els.board.height / 2;
+  render();
+}
+for (const z of ZOOMS) { const o = document.createElement('option'); o.value = z; o.textContent = z + ' px per cell'; if (z === state.zoom) o.selected = true; $('zoomSel').appendChild(o); }
+$('zoomSel').addEventListener('change', () => setZoom(Number($('zoomSel').value)));
+$('palSel').addEventListener('change', () => { PAL_SCALE = Number($('palSel').value); renderPalette(); });
 els.dimOthers.addEventListener('change', render);
+els.wrap.addEventListener('scroll', render);
+window.addEventListener('resize', render);
 window.addEventListener('keydown', ev => {
   if (ev.target && (ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA')) return;
   const k = ev.key.toLowerCase();
@@ -728,11 +759,28 @@ window.addEventListener('keydown', ev => {
 window.addEventListener('beforeunload', ev => { if (state.dirty) { flushSave(); ev.preventDefault(); ev.returnValue = ''; } });
 
 // ---------- boot ----------
+function placeBoards(pl) {
+  return [...state.boards.entries()].filter(([id, m]) => (m.place || (BUNDLED[id] ? BUNDLED[id].place : PLACES[0])) === pl)
+    .sort((a, b) => (BUNDLED[a[0]] ? -1 : BUNDLED[b[0]] ? 1 : (b[1].updatedAt || '').localeCompare(a[1].updatedAt || '')));
+}
+// A page shows its own boards only: its first board, or an empty one that
+// is saved the moment something is painted on it.
+async function openPlace(pl) {
+  const mine = placeBoards(pl);
+  if (mine.length) return openBoard(mine[0][0]);
+  await flushSave(); releaseLease();
+  const b = blankBoard(slug(pl), pl, els.authorName.value.trim() || 'someone');
+  b.place = pl;
+  state.cur = b; state.readOnly = false; state.undo = []; state.redo = []; state.dirty = false;
+  els.boardName.value = b.name; els.boardName.disabled = false; $('btnDelete').disabled = true;
+  setStatus('empty', '');
+  renderBoards(); renderLayers(); render();
+}
 function renderPlaces() {
   const nav = $('places'); nav.innerHTML = '';
   for (const pl of PLACES) {
     const b = document.createElement('button'); b.textContent = pl; b.className = pl === state.place ? 'on' : '';
-    b.addEventListener('click', () => { state.place = pl; renderPlaces(); renderBoards(); });
+    b.addEventListener('click', () => { state.place = pl; renderPlaces(); openPlace(pl); });
     nav.appendChild(b);
   }
 }

@@ -33,7 +33,10 @@
   .status { font-family: var(--mono); font-size: 12px; color: var(--muted); }
   .status.ok { color: var(--accent); } .status.warn { color: var(--amber); } .status.bad { color: var(--red); }
   .spacer { flex: 1; }
-  main { flex: 1; min-height: 0; display: grid; grid-template-columns: 236px minmax(320px, 1fr) 320px; gap: 0; }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--left, 236px) 6px minmax(160px, 1fr) 6px var(--right, 320px); gap: 0; }
+  .gutter { background: var(--line); cursor: col-resize; touch-action: none; }
+  .gutter:hover, .gutter.drag { background: var(--accent); }
+  aside, .right { min-width: 0; }
   aside, .right { background: var(--panel); border-right: 1px solid var(--line); padding: 12px; overflow: auto; min-height: 0; height: 100%; overscroll-behavior: contain; }
   .right { border-right: 0; border-left: 1px solid var(--line); }
   section { margin-bottom: 18px; }
@@ -78,6 +81,7 @@
   @media (max-width: 900px) {
     body { overflow: auto; display: block; }
     main { grid-template-columns: 1fr; }
+    .gutter { display: none; }
     aside, .right { border: 0; border-bottom: 1px solid var(--line); height: auto; }
     .canvasWrap { height: 70vh; }
   }
@@ -122,12 +126,14 @@
     </section>
   </aside>
 
+  <div class="gutter" id="gutterL" title="drag to resize"></div>
   <div class="canvasWrap" id="canvasWrap">
     <div id="spacer"></div>
     <canvas id="board" width="10" height="10"></canvas>
     <div class="coord" id="coord">–</div>
   </div>
 
+  <div class="gutter" id="gutterR" title="drag to resize"></div>
   <div class="right">
     <section>
       <h2>Tile sheet</h2>
@@ -319,11 +325,20 @@ function render() { if (!renderQueued) { renderQueued = true; requestAnimationFr
 // board can be zoomed far past what one canvas the size of the whole
 // board could hold.
 function viewOrigin() { return [els.wrap.scrollLeft, els.wrap.scrollTop]; }
+// how many slot rows the board shows: the painted ones plus one empty row to
+// paint into, at least two, never more than the board holds
+function boardRows() {
+  let last = -1;
+  const b = state.cur;
+  if (b) for (const L of LAYERS) for (const k of b.layers[L].keys()) last = Math.max(last, Number(slotOf(...k.split(',').map(Number)).split(',')[1]));
+  return Math.min(SLOT_ROWS, Math.max(2, last + 2));
+}
 function paintBoard() {
   const z = state.zoom;
   const spacer = $('spacer');
-  spacer.style.width = (COLS * z) + 'px'; spacer.style.height = (ROWS * z) + 'px';
-  const vw = Math.min(els.wrap.clientWidth, COLS * z), vh = Math.min(els.wrap.clientHeight, ROWS * z);
+  const rowsShown = boardRows();
+  spacer.style.width = (COLS * z) + 'px'; spacer.style.height = (rowsShown * 24 * z) + 'px';
+  const vw = Math.min(els.wrap.clientWidth, COLS * z), vh = Math.min(els.wrap.clientHeight, rowsShown * 24 * z);
   if (els.board.width !== vw || els.board.height !== vh) { els.board.width = vw; els.board.height = vh; }
   const [ox, oy] = viewOrigin();
   ctx.imageSmoothingEnabled = false;
@@ -787,6 +802,34 @@ $('zoomSel').addEventListener('change', () => setZoom(Number($('zoomSel').value)
 $('palSel').addEventListener('change', () => setPalScale(Number($('palSel').value)));
 els.dimOthers.addEventListener('change', render);
 els.wrap.addEventListener('scroll', render);
+// the side panels: drag the handles; double-click one to put it back
+(() => {
+  const mainEl = document.querySelector('main');
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('taw_panels') || '{}'); } catch (e) { return {}; } })();
+  const widths = {left: saved.left || 236, right: saved.right || 320};
+  function apply() {
+    mainEl.style.setProperty('--left', widths.left + 'px'); mainEl.style.setProperty('--right', widths.right + 'px');
+    try { localStorage.setItem('taw_panels', JSON.stringify(widths)); } catch (e) {}
+    render();
+  }
+  function hook(id, side) {
+    const g = $(id);
+    g.addEventListener('pointerdown', ev => {
+      ev.preventDefault(); g.classList.add('drag'); g.setPointerCapture(ev.pointerId);
+      const move = e => {
+        const r = mainEl.getBoundingClientRect();
+        const max = Math.max(40, r.width - (side === 'left' ? widths.right : widths.left) - 200);
+        widths[side] = Math.round(Math.min(max, Math.max(40, side === 'left' ? e.clientX - r.left - 3 : r.right - e.clientX - 3)));
+        apply();
+      };
+      const up = () => { g.classList.remove('drag'); g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up); g.removeEventListener('pointercancel', up); };
+      g.addEventListener('pointermove', move); g.addEventListener('pointerup', up); g.addEventListener('pointercancel', up);
+    });
+    g.addEventListener('dblclick', () => { widths[side] = side === 'left' ? 236 : 320; apply(); });
+  }
+  hook('gutterL', 'left'); hook('gutterR', 'right');
+  apply();
+})();
 window.addEventListener('resize', render);
 window.addEventListener('keydown', ev => {
   if (ev.target && (ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA')) return;

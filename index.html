@@ -766,7 +766,10 @@ async function saveNow() {
     $('btnDelete').disabled = false;
   } catch (e) {
     state.dirty = true;
-    setStatus('could not save: ' + (e && e.code === 'quota_exceeded' ? 'the store is full - delete an old board' : (e && e.message) || 'try again'), 'bad');
+    const why = e && e.code === 'quota_exceeded' ? 'the store is full - delete an old board' : (e && (e.code || e.message)) || 'unknown';
+    setStatus('NOT SAVED: ' + why + ' - retrying; download the board to be safe', 'bad');
+    toast('could not save the board (' + why + ')');
+    clearTimeout(state.saveTimer); state.saveTimer = setTimeout(saveNow, 15000);
   }
   renderBoards();
 }
@@ -826,6 +829,31 @@ function onStoreChange(docs) {
   for (const id of [...state.boards.keys()]) if (!BUNDLED[id] && !seen.has(id)) state.boards.delete(id);
   for (const id in BUNDLED) if (!seen.has(id)) state.boards.set(id, {name: BUNDLED[id].data.name, author: BUNDLED[id].data.author, place: BUNDLED[id].place, updatedAt: ''});
   renderBoards();
+}
+
+// boards (and sheets) that were saved in this browser while the cloud was
+// unavailable: offer to send them up once it is
+async function offerLocalUpload() {
+  const boards = Object.entries(lsRead());
+  let sheets = {}; try { sheets = JSON.parse(localStorage.getItem('taw_sheets_v1') || '{}'); } catch (e) {}
+  const n = boards.length + Object.keys(sheets).length;
+  if (!n) return;
+  const btn = document.createElement('button');
+  btn.textContent = 'Upload ' + n + ' kept in this browser to the cloud';
+  btn.style.marginTop = '6px';
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      for (const [id, d] of boards) {
+        const exists = await store.load(id);
+        await store.save(exists ? id + '-' + Math.random().toString(36).slice(2, 6) : id, Object.assign({}, d, {updatedAt: new Date().toISOString()}));
+      }
+      for (const [sid, v] of Object.entries(sheets)) await store.saveSheet(sid, Object.assign({}, v.meta, {png: v.png}));
+      try { localStorage.removeItem(LS_KEY); localStorage.removeItem('taw_sheets_v1'); } catch (e) {}
+      toast('uploaded ' + n + ' to the cloud'); btn.remove();
+    } catch (e) { btn.disabled = false; toast('upload failed: ' + ((e && (e.code || e.message)) || 'unknown')); }
+  });
+  els.cloudNote.parentElement.appendChild(btn);
 }
 
 // ---------- export / import ----------
@@ -1003,10 +1031,17 @@ for (const id in BUNDLED) state.boards.set(id, {name: BUNDLED[id].data.name, aut
 renderBoards();
 window.BOARD_CURRENT_ID = () => (state.cur ? state.cur.id : null);
 (async () => {
+  let cloudFailed = false;
   if (window.BOARD_STORE_FACTORY) {
-    try { const s = await window.BOARD_STORE_FACTORY(); if (s) store = s; } catch (e) {}
+    try { const s = await window.BOARD_STORE_FACTORY(); if (s) store = s; else cloudFailed = true; } catch (e) { cloudFailed = true; }
   }
   els.cloudNote.hidden = !!store.cloud;
+  if (cloudFailed) {
+    els.cloudNote.hidden = false; els.cloudNote.textContent = 'CLOUD SAVING FAILED TO LOAD. Boards painted now stay in this browser only. Reload to try again, and download anything important.';
+    els.cloudNote.style.color = 'var(--red)';
+    setStatus('cloud saving failed to load - saving in this browser only', 'bad');
+  }
+  if (store.cloud) offerLocalUpload();
   store.list(onStoreChange, e => setStatus('the board list is unavailable (' + ((e && e.code) || 'error') + ')', 'bad'));
   await loadCustomSheets();
   const restore = store.restoreId;

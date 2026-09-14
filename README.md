@@ -10,9 +10,9 @@ Boards are kept in your browser. Download a board to keep a copy or to hand
 it to someone else; **Import a board** takes a downloaded `.json` or the text
 of a `.tscn` board.
 
-To refresh the tile sheets and the reference board after the game's art or
-main board changes, run `python3 tools/board_editor_data.py` in the game
-repository and copy this folder again.
+To refresh the tile sheets and the game's boards after the game's art, main
+board or tutorial changes, run `python3 refresh_from_game.py /path/to/the/game`
+here and push.
 
 ## Live shared saving
 
@@ -57,5 +57,12 @@ To put that art into the game, **Download sheets for the game** saves
 
 which writes the PNGs into the project and adds or refreshes the tileset's
 sources. Open the project in Godot once so it imports the images, then run
-`python3 tools/board_editor_data.py` and push the site so the editor ships
-the new art as well.
+`python3 refresh_from_game.py /path/to/the/game` here and push, so the
+editor ships the new art as well.
+
+## Backups
+
+`.github/workflows/board-backup.yml` runs `backup.py` every four hours and
+commits the shared boards and sheets under `backups/` whenever they changed.
+Turn it on once: Settings, Actions, General, "Read and write permissions"
+under Workflow permissions; then Actions, Board backup, Run workflow.

@@ -11,7 +11,9 @@
     --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--body); font-size: 14px; line-height: 1.45; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--body); font-size: 14px; line-height: 1.45; display: flex; flex-direction: column; overflow: hidden; }
+  header, .places { flex: none; }
   button, input, select, textarea { font: inherit; color: inherit; }
   button { background: var(--panel2); border: 1px solid var(--line2); border-radius: 4px; padding: 5px 10px; cursor: pointer; }
   button:hover { border-color: var(--muted); }
@@ -31,8 +33,8 @@
   .status { font-family: var(--mono); font-size: 12px; color: var(--muted); }
   .status.ok { color: var(--accent); } .status.warn { color: var(--amber); } .status.bad { color: var(--red); }
   .spacer { flex: 1; }
-  main { display: grid; grid-template-columns: 236px minmax(320px, 1fr) 320px; gap: 0; min-height: calc(100vh - 104px); }
-  aside, .right { background: var(--panel); border-right: 1px solid var(--line); padding: 12px; overflow: auto; }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: 236px minmax(320px, 1fr) 320px; gap: 0; }
+  aside, .right { background: var(--panel); border-right: 1px solid var(--line); padding: 12px; overflow: auto; min-height: 0; height: 100%; overscroll-behavior: contain; }
   .right { border-right: 0; border-left: 1px solid var(--line); }
   section { margin-bottom: 18px; }
   h2 { font-family: var(--display); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
@@ -55,14 +57,14 @@
   .tools button { padding: 6px 4px; font-size: 12px; }
   .tools select { background: var(--bg); border: 1px solid var(--line2); border-radius: 4px; padding: 4px 6px; font-family: var(--mono); font-size: 12px; }
   .tools button kbd { display: block; font-family: var(--mono); font-size: 10px; color: var(--muted); }
-  .canvasWrap { position: relative; overflow: auto; background: #000; }
+  .canvasWrap { position: relative; overflow: auto; background: #000; min-height: 0; height: 100%; overscroll-behavior: contain; touch-action: none; }
   #board { display: block; image-rendering: pixelated; cursor: crosshair; position: sticky; top: 0; left: 0; z-index: 1; }
   #spacer { position: absolute; left: 0; top: 0; width: 1px; height: 1px; }
   .coord { position: sticky; left: 0; bottom: 0; z-index: 2; font-family: var(--mono); font-size: 11px; color: var(--muted); background: rgba(20,22,28,.85); padding: 3px 8px; width: max-content; }
   .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
   .tab { font-size: 12px; padding: 4px 8px; border: 1px solid var(--line2); border-radius: 4px; background: var(--bg); cursor: pointer; }
   .tab.on { border-color: var(--accent); color: var(--accent); }
-  .palWrap { overflow: auto; max-height: 46vh; border: 1px solid var(--line); background: #0d0e12; }
+  .palWrap { overflow: auto; max-height: 52vh; border: 1px solid var(--line); background: #0d0e12; overscroll-behavior: contain; touch-action: none; }
   #palette { display: block; image-rendering: pixelated; cursor: cell; }
   .stampBox { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
   #stampPreview { image-rendering: pixelated; background: #0d0e12; border: 1px solid var(--line); }
@@ -74,9 +76,10 @@
   .toast.show { opacity: 1; }
   details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
   @media (max-width: 900px) {
+    body { overflow: auto; display: block; }
     main { grid-template-columns: 1fr; }
-    aside, .right { border: 0; border-bottom: 1px solid var(--line); }
-    .canvasWrap { max-height: 70vh; }
+    aside, .right { border: 0; border-bottom: 1px solid var(--line); height: auto; }
+    .canvasWrap { height: 70vh; }
   }
   @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
 </style>
@@ -725,18 +728,63 @@ $('btnUndo').addEventListener('click', undo); $('btnRedo').addEventListener('cli
 $('flagH').addEventListener('click', () => { state.flags ^= FLIP_H; syncFlags(); updateStampInfo(); render(); });
 $('flagV').addEventListener('click', () => { state.flags ^= FLIP_V; syncFlags(); updateStampInfo(); render(); });
 $('flagT').addEventListener('click', () => { state.flags ^= TRANSPOSE; syncFlags(); updateStampInfo(); render(); });
-function setZoom(z) {
-  // keep the middle of the view on the same cell
+// Zoom keeping the board point under (px, py) - view pixels - where it is;
+// with no point given, the middle of the view.
+function setZoomAt(z, px, py) {
+  z = Math.max(ZOOMS[0], Math.min(ZOOMS[ZOOMS.length - 1], Math.round(z)));
+  if (z === state.zoom) return;
   const [ox, oy] = viewOrigin();
-  const cx = (ox + els.board.width / 2) / state.zoom, cy = (oy + els.board.height / 2) / state.zoom;
-  state.zoom = z; $('zoomSel').value = String(z);
+  if (px === undefined) { px = els.board.width / 2; py = els.board.height / 2; }
+  const cx = (ox + px) / state.zoom, cy = (oy + py) / state.zoom;
+  state.zoom = z;
+  const sel = $('zoomSel');
+  sel.value = String(ZOOMS.includes(z) ? z : ZOOMS.reduce((a, b) => Math.abs(b - z) < Math.abs(a - z) ? b : a));
   paintBoard();
-  els.wrap.scrollLeft = cx * z - els.board.width / 2; els.wrap.scrollTop = cy * z - els.board.height / 2;
+  els.wrap.scrollLeft = cx * z - px; els.wrap.scrollTop = cy * z - py;
   render();
 }
+function setZoom(z) { setZoomAt(z); }
+// a pinch on a trackpad arrives as a wheel with ctrlKey (Chrome, Firefox)
+// or as gesture events (Safari); either zooms the panel it happens over
+els.wrap.addEventListener('wheel', ev => {
+  if (!(ev.ctrlKey || ev.metaKey)) return;  // a plain wheel scrolls the panel
+  ev.preventDefault();
+  const r = els.board.getBoundingClientRect();
+  setZoomAt(state.zoom * Math.exp(-ev.deltaY * 0.01), ev.clientX - r.left, ev.clientY - r.top);
+}, {passive: false});
+let gestureBase = 0;
+els.wrap.addEventListener('gesturestart', ev => { ev.preventDefault(); gestureBase = state.zoom; });
+els.wrap.addEventListener('gesturechange', ev => {
+  ev.preventDefault();
+  const r = els.board.getBoundingClientRect();
+  setZoomAt(gestureBase * ev.scale, ev.clientX - r.left, ev.clientY - r.top);
+});
+els.wrap.addEventListener('gestureend', ev => ev.preventDefault());
+function setPalScale(sc, px, py) {
+  sc = Math.max(0.25, Math.min(4, sc));
+  const w = els.palWrap;
+  const fx = (w.scrollLeft + (px === undefined ? w.clientWidth / 2 : px)) / PAL_SCALE;
+  const fy = (w.scrollTop + (py === undefined ? w.clientHeight / 2 : py)) / PAL_SCALE;
+  PAL_SCALE = sc;
+  const opts = [...$('palSel').options].map(o => Number(o.value));
+  $('palSel').value = String(opts.reduce((a, b) => Math.abs(b - sc) < Math.abs(a - sc) ? b : a));
+  renderPalette();
+  w.scrollLeft = fx * sc - (px === undefined ? w.clientWidth / 2 : px);
+  w.scrollTop = fy * sc - (py === undefined ? w.clientHeight / 2 : py);
+}
+els.palWrap.addEventListener('wheel', ev => {
+  if (!(ev.ctrlKey || ev.metaKey)) return;
+  ev.preventDefault();
+  const r = els.palWrap.getBoundingClientRect();
+  setPalScale(PAL_SCALE * Math.exp(-ev.deltaY * 0.01), ev.clientX - r.left, ev.clientY - r.top);
+}, {passive: false});
+let palGestureBase = 0;
+els.palWrap.addEventListener('gesturestart', ev => { ev.preventDefault(); palGestureBase = PAL_SCALE; });
+els.palWrap.addEventListener('gesturechange', ev => { ev.preventDefault(); const r = els.palWrap.getBoundingClientRect(); setPalScale(palGestureBase * ev.scale, ev.clientX - r.left, ev.clientY - r.top); });
+els.palWrap.addEventListener('gestureend', ev => ev.preventDefault());
 for (const z of ZOOMS) { const o = document.createElement('option'); o.value = z; o.textContent = z + ' px per cell'; if (z === state.zoom) o.selected = true; $('zoomSel').appendChild(o); }
 $('zoomSel').addEventListener('change', () => setZoom(Number($('zoomSel').value)));
-$('palSel').addEventListener('change', () => { PAL_SCALE = Number($('palSel').value); renderPalette(); });
+$('palSel').addEventListener('change', () => setPalScale(Number($('palSel').value)));
 els.dimOthers.addEventListener('change', render);
 els.wrap.addEventListener('scroll', render);
 window.addEventListener('resize', render);

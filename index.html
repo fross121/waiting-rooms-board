@@ -54,7 +54,7 @@
   .tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
   .tools button { padding: 6px 4px; font-size: 12px; }
   .tools button kbd { display: block; font-family: var(--mono); font-size: 10px; color: var(--muted); }
-  .canvasWrap { position: relative; overflow: auto; background: #0d0e12; background-image: linear-gradient(45deg, #111319 25%, transparent 25%, transparent 75%, #111319 75%), linear-gradient(45deg, #111319 25%, transparent 25%, transparent 75%, #111319 75%); background-size: 24px 24px; background-position: 0 0, 12px 12px; }
+  .canvasWrap { position: relative; overflow: auto; background: #000; }
   #board { display: block; image-rendering: pixelated; cursor: crosshair; }
   .coord { position: sticky; left: 0; bottom: 0; font-family: var(--mono); font-size: 11px; color: var(--muted); background: rgba(20,22,28,.85); padding: 3px 8px; width: max-content; }
   .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
@@ -158,6 +158,7 @@
 
 <script src="manifest.js"></script>
 <script src="main_board.js"></script>
+<script src="tutorial_board.js"></script>
 <script>
 (() => {
 'use strict';
@@ -166,14 +167,17 @@ const LAYER_LABEL = {TileMapLayer: 'Base', Decoration: 'Decoration', Foreground:
 const LAYER_Z = {TileMapLayer: -1, Decoration: -1, Foreground: 13, Signs: 13};
 const SOURCE_LABEL = {0: 'Assets', 1: 'Lights', 2: 'Scaffold', 3: 'Ward lockers', 6: 'Med chest', 7: 'Backpack', 8: 'Lockers', 9: 'Padlocks', 10: 'Old facility'};
 const FLIP_H = 4096, FLIP_V = 8192, TRANSPOSE = 16384;
-// the board: 8 by 5 slots of 16 by 24 cells; the dealer splits slots between
+// the board: 8 by 9 slots of 16 by 24 cells; the dealer splits slots between
 // columns 16k-2 and 16k-1 and rows 24k-10 and 24k-9
-const X0 = -1, Y0 = -9, COLS = 129, ROWS = 120;
+const SLOT_ROWS = 9;
+const X0 = -1, Y0 = -9, COLS = 129, ROWS = 24 * SLOT_ROWS;
 const ZOOMS = [4, 6, 8, 12, 16];
-const MAIN_ID = 'main-board';
 // THE PLACES a level can be: one page of boards each. Add a name here to add a page.
-const PLACES = ['Hospital', 'Police station', 'Construction site', 'Military base', "Willbee's", 'School', 'Port', 'Housing'];
-const MAIN_PLACE = 'Hospital';  // the game's own board is the hospital's
+const PLACES = ['Hospital', 'Police station', 'Construction site', 'Military base', "Willbee's", 'School', 'Port', 'Housing', 'Tutorial'];
+// the game's own boards, shipped with the page: shown on their page until someone saves a change to them
+const BUNDLED = {'main-board': {place: 'Hospital', data: window.MAIN_BOARD}, 'tutorial-board': {place: 'Tutorial', data: window.TUTORIAL_BOARD}};
+const MAIN_ID = 'main-board';
+const MAIN_PLACE = 'Hospital';
 
 const $ = id => document.getElementById(id);
 const els = {
@@ -219,10 +223,10 @@ function boardToDoc(b) {
   const layers = {};
   let n = 0;
   for (const L of LAYERS) { layers[L] = encodeLayer(b.layers[L]); n += b.layers[L].size; }
-  return {format: 'tawboard/1', name: b.name, author: b.author, place: b.place || MAIN_PLACE, layers, cells: n, updatedAt: new Date().toISOString()};
+  return {format: 'tawboard/1', name: b.name, author: b.author, place: b.place || PLACES[0], layers, cells: n, updatedAt: new Date().toISOString()};
 }
 function docToBoard(id, d) {
-  const b = {id, name: d.name || id, author: d.author || '', place: d.place || (id === MAIN_ID ? MAIN_PLACE : PLACES[0]), layers: {}, updatedAt: d.updatedAt || ''};
+  const b = {id, name: d.name || id, author: d.author || '', place: d.place || (BUNDLED[id] ? BUNDLED[id].place : PLACES[0]), layers: {}, updatedAt: d.updatedAt || ''};
   for (const L of LAYERS) b.layers[L] = decodeLayer(d.layers && d.layers[L]);
   return b;
 }
@@ -232,7 +236,7 @@ function sceneText(b) {
   for (const L of LAYERS) {
     t += `[node name="${L}" type="TileMapLayer" parent="."]\nz_index = ${LAYER_Z[L]}\ntile_map_data = PackedByteArray("${encodeLayer(b.layers[L])}")\ntile_set = ExtResource("1_tileset")\n\n`;
   }
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 8 * SLOT_ROWS; i++) {
     t += `[node name="Room${i + 1}" type="Marker2D" parent="."]\nposition = Vector2(${(i % 8) * 1024}, ${-448 + Math.floor(i / 8) * 1536})\n\n`;
   }
   return t;
@@ -318,15 +322,19 @@ function paintBoard() {
     }
     ctx.globalAlpha = 1;
   }
-  // slot boxes: the dealer's split lines, and the slot's marker cell
+  // slot boxes only where a room is painted, plus the slot under the cursor
+  const used = new Set();
+  if (b) for (const L of LAYERS) for (const k of b.layers[L].keys()) { const [x, y] = k.split(',').map(Number); used.add(slotOf(x, y)); }
+  if (state.hover) used.add(slotOf(state.hover.x, state.hover.y));
   ctx.strokeStyle = 'rgba(158,240,128,.28)'; ctx.setLineDash([z / 2, z / 2]); ctx.lineWidth = 1;
-  for (let k = 0; k <= 8; k++) { const x = (16 * k - 1 - X0) * z + .5; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ROWS * z); ctx.stroke(); }
-  for (let k = 0; k <= 5; k++) { const y = (24 * k - 9 - Y0) * z + .5; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(COLS * z, y); ctx.stroke(); }
-  ctx.setLineDash([]);
-  if (z >= 6) {
-    ctx.fillStyle = 'rgba(158,240,128,.55)'; ctx.font = `${Math.max(9, z)}px "IBM Plex Mono", monospace`; ctx.textBaseline = 'top';
-    for (let sy = 0; sy < 5; sy++) for (let sx = 0; sx < 8; sx++) ctx.fillText('Room ' + (sy * 8 + sx + 1), (16 * sx - X0) * z + 2, (24 * sy - 9 - Y0) * z + 2);
+  ctx.fillStyle = 'rgba(158,240,128,.55)'; ctx.font = `${Math.max(9, z)}px "IBM Plex Mono", monospace`; ctx.textBaseline = 'top';
+  for (const sk of used) {
+    const [sx, sy] = sk.split(',').map(Number);
+    const x = (16 * sx - 1 - X0) * z + .5, y = (24 * sy - 9 - Y0) * z + .5;
+    ctx.strokeRect(x, y, 16 * z, 24 * z);
+    if (z >= 6) ctx.fillText('Room ' + (sy * 8 + sx + 1), x + 2, y + 2);
   }
+  ctx.setLineDash([]);
   // hover: the stamp's footprint
   if (state.hover && !state.readOnly) {
     const {x, y} = state.hover;
@@ -417,6 +425,7 @@ window.addEventListener('mouseup', ev => {
 
 // ---------- editing ----------
 function key(x, y) { return x + ',' + y; }
+function slotOf(x, y) { return Math.min(7, Math.max(0, Math.round((x - 6.5) / 16))) + ',' + Math.min(SLOT_ROWS - 1, Math.max(0, Math.round((y - 2.5) / 24))); }
 function cellAt(ev) {
   const r = els.board.getBoundingClientRect();
   return {x: Math.floor((ev.clientX - r.left) / state.zoom) + X0, y: Math.floor((ev.clientY - r.top) / state.zoom) + Y0};
@@ -491,7 +500,7 @@ els.board.addEventListener('mousedown', ev => {
 els.board.addEventListener('mousemove', ev => {
   const c = cellAt(ev);
   state.hover = c;
-  const sx = Math.min(7, Math.max(0, Math.round((c.x - 6.5) / 16))), sy = Math.min(4, Math.max(0, Math.round((c.y - 2.5) / 24)));
+  const sx = Math.min(7, Math.max(0, Math.round((c.x - 6.5) / 16))), sy = Math.min(SLOT_ROWS - 1, Math.max(0, Math.round((c.y - 2.5) / 24)));
   const t = state.cur ? state.cur.layers[state.layer].get(key(c.x, c.y)) : null;
   els.coord.textContent = `cell ${c.x}, ${c.y}  ·  Room ${sy * 8 + sx + 1}` + (t ? `  ·  ${SOURCE_LABEL[t[0]] || 'src ' + t[0]} (${t[1]}, ${t[2]})` : '');
   if (state.stroke) strokeTo(c); else render();
@@ -517,8 +526,8 @@ function renderLayers() {
 }
 function renderBoards() {
   els.boards.innerHTML = '';
-  const items = [...state.boards.entries()].filter(([id, m]) => (m.place || (id === MAIN_ID ? MAIN_PLACE : PLACES[0])) === state.place)
-    .sort((a, b) => (a[0] === MAIN_ID ? -1 : b[0] === MAIN_ID ? 1 : (b[1].updatedAt || '').localeCompare(a[1].updatedAt || '')));
+  const items = [...state.boards.entries()].filter(([id, m]) => (m.place || (BUNDLED[id] ? BUNDLED[id].place : PLACES[0])) === state.place)
+    .sort((a, b) => (BUNDLED[a[0]] ? -1 : BUNDLED[b[0]] ? 1 : (b[1].updatedAt || '').localeCompare(a[1].updatedAt || '')));
   if (!items.length) { const e = document.createElement('p'); e.className = 'help'; e.textContent = 'No boards yet.'; els.boards.appendChild(e); }
   for (const [id, m] of items) {
     const d = document.createElement('div');
@@ -526,7 +535,7 @@ function renderBoards() {
     const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = m.name || id;
     const by = document.createElement('span'); by.className = 'by'; by.textContent = m.author ? 'by ' + m.author : '';
     d.append(nm, by);
-    if (id === MAIN_ID) { const p = document.createElement('span'); p.className = 'pill'; p.textContent = 'the game\'s'; d.appendChild(p); }
+    if (BUNDLED[id]) { const p = document.createElement('span'); p.className = 'pill'; p.textContent = 'the game\'s'; d.appendChild(p); }
     if (m.busy) { const p = document.createElement('span'); p.className = 'pill lock'; p.textContent = 'in use'; d.appendChild(p); }
     d.addEventListener('click', () => openBoard(id));
     els.boards.appendChild(d);
@@ -548,7 +557,7 @@ async function openBoard(id) {
   // the game's own board is editable like any other: the saved copy when
   // someone has changed it, the game's bundled one until then
   let d = await loadDoc(id);
-  if (!d && id === MAIN_ID) d = window.MAIN_BOARD;
+  if (!d && BUNDLED[id]) d = BUNDLED[id].data;
   if (!d) { toast('that board is gone'); state.boards.delete(id); renderBoards(); return; }
   b = docToBoard(id, d);
   state.readOnly = !(await takeLease(id));
@@ -580,13 +589,13 @@ $('btnNew').addEventListener('click', () => newBoard(null));
 $('btnDuplicate').addEventListener('click', () => { if (state.cur) newBoard(state.cur); });
 $('btnDelete').addEventListener('click', async () => {
   if (!state.cur || state.readOnly) return;
-  if (!confirm(state.cur.id === MAIN_ID ? 'Throw away every change to the game\'s board and go back to the copy the game shipped with?' : `Delete "${state.cur.name}" for everyone? This cannot be undone.`)) return;
+  if (!confirm(BUNDLED[state.cur.id] ? 'Throw away every change to the game\'s board and go back to the copy the game shipped with?' : `Delete "${state.cur.name}" for everyone? This cannot be undone.`)) return;
   const id = state.cur.id;
   clearTimeout(state.saveTimer); state.dirty = false;
   await deleteDoc(id);
   state.boards.delete(id); state.cur = null; releaseLease();
   els.boardName.value = ''; renderBoards(); renderLayers(); render(); setStatus('deleted', '');
-  if (id === MAIN_ID) { state.boards.set(MAIN_ID, {name: window.MAIN_BOARD.name, author: window.MAIN_BOARD.author, place: MAIN_PLACE, updatedAt: ''}); openBoard(MAIN_ID); }
+  if (BUNDLED[id]) { state.boards.set(id, {name: BUNDLED[id].data.name, author: BUNDLED[id].data.author, place: BUNDLED[id].place, updatedAt: ''}); openBoard(id); }
 });
 
 function markDirty() {
@@ -654,8 +663,8 @@ function onStoreChange(docs) {
       const b = docToBoard(d.id, m); state.cur.layers = b.layers; state.cur.name = b.name; els.boardName.value = b.name; render(); renderLayers();
     }
   }
-  for (const id of [...state.boards.keys()]) if (id !== MAIN_ID && !seen.has(id)) state.boards.delete(id);
-  if (!seen.has(MAIN_ID)) state.boards.set(MAIN_ID, {...state.boards.get(MAIN_ID), place: MAIN_PLACE});
+  for (const id of [...state.boards.keys()]) if (!BUNDLED[id] && !seen.has(id)) state.boards.delete(id);
+  for (const id in BUNDLED) if (!seen.has(id)) state.boards.set(id, {name: BUNDLED[id].data.name, author: BUNDLED[id].data.author, place: BUNDLED[id].place, updatedAt: ''});
   renderBoards();
 }
 
@@ -728,7 +737,7 @@ function renderPlaces() {
   }
 }
 buildTabs(); renderLayers(); syncTools(); syncFlags(); updateStampInfo(); renderPlaces();
-state.boards.set(MAIN_ID, {name: window.MAIN_BOARD.name, author: window.MAIN_BOARD.author, place: MAIN_PLACE, updatedAt: ''});
+for (const id in BUNDLED) state.boards.set(id, {name: BUNDLED[id].data.name, author: BUNDLED[id].data.author, place: BUNDLED[id].place, updatedAt: ''});
 renderBoards();
 window.BOARD_CURRENT_ID = () => (state.cur ? state.cur.id : null);
 (async () => {

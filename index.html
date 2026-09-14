@@ -300,7 +300,7 @@ const state = {
   stamp: null,                 // {cells: [[dx,dy,src,ax,ay]], w, h, src}
   flags: 0, source: '0',
   undo: [], redo: [], stroke: null,
-  hover: null, dirty: false, saveTimer: 0,
+  hover: null, dirty: false, saveTimer: 0, retryTimer: 0,
 };
 const holder = (() => { try { return localStorage.getItem('taw_holder') || (localStorage.setItem('taw_holder', 'h' + Math.random().toString(36).slice(2)), localStorage.getItem('taw_holder')); } catch (e) { return 'h' + Math.random().toString(36).slice(2); } })();
 try { els.authorName.value = localStorage.getItem('taw_author') || ''; } catch (e) {}
@@ -624,7 +624,7 @@ els.board.addEventListener('contextmenu', ev => ev.preventDefault());
 els.board.addEventListener('mousedown', ev => {
   if (!state.cur) return;
   const c = cellAt(ev);
-  if (state.readOnly) { if (ev.button === 0) toast('this board is read-only here - duplicate it to edit'); return; }
+  if (state.readOnly) { if (ev.button === 0) toast('someone else is editing this board - you are watching it live; duplicate it to work on a copy'); return; }
   if (ev.button === 2 || state.tool === 'erase') { beginStroke('erase'); strokeTo(c); }
   else if (ev.button === 0 && state.tool === 'pick') pickAt(c.x, c.y);
   else if (ev.button === 0 && state.tool === 'paint') {
@@ -701,7 +701,18 @@ async function openBoard(id) {
   if (PLACES.includes(b.place) && b.place !== state.place) { state.place = b.place; renderPlaces(); }
   els.boardName.value = b.name; els.boardName.disabled = state.readOnly;
   $('btnDelete').disabled = state.readOnly;
-  setStatus(state.readOnly ? 'someone else is editing this board - read-only until they stop' : 'opened', state.readOnly ? 'warn' : '');
+  setStatus(state.readOnly ? 'watching live - someone else is editing this board; you can edit when they stop' : 'opened', state.readOnly ? 'warn' : '');
+  if (state.readOnly) {
+    // keep asking for the lock: the moment the other editor stops, it is yours
+    state.retryTimer = setInterval(async () => {
+      if (!state.cur || state.cur.id !== id || !state.readOnly) { clearInterval(state.retryTimer); state.retryTimer = 0; return; }
+      if (await takeLease(id)) {
+        clearInterval(state.retryTimer); state.retryTimer = 0;
+        state.readOnly = false; els.boardName.disabled = false; $('btnDelete').disabled = false;
+        setStatus('they have stopped - the board is yours to edit', 'ok'); render();
+      }
+    }, 20000);
+  }
   renderBoards(); renderLayers(); render();
 }
 async function newBoard(from) {
@@ -799,16 +810,17 @@ async function loadDoc(id) { return store.load(id); }
 async function storeDoc(id, doc) { return store.save(id, doc); }
 async function deleteDoc(id) { return store.remove(id); }
 async function takeLease(id) { try { return await store.lease(id, holder, () => toast('lost the lock on this board')); } catch (e) { return true; } }
-function releaseLease() { store.release(); }
+function releaseLease() { store.release(); clearInterval(state.retryTimer); state.retryTimer = 0; }
 function onStoreChange(docs) {
   const seen = new Set();
   for (const d of docs) {
     const m = d.data || {};
     seen.add(d.id);
     state.boards.set(d.id, {...(state.boards.get(d.id) || {}), name: m.name, author: m.author, place: m.place, slotW: Number(m.slot_w) || 16, updatedAt: m.updatedAt, cells: m.cells});
-    // another editor's live changes to the board we are only reading
+    // another editor's live changes to the board we are only watching
     if (state.cur && state.cur.id === d.id && state.readOnly && !d.pending) {
       const b = docToBoard(d.id, m); state.cur.layers = b.layers; state.cur.name = b.name; els.boardName.value = b.name; render(); renderLayers();
+      setStatus('watching live - someone else is editing this board (changed ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'}) + ')', 'warn');
     }
   }
   for (const id of [...state.boards.keys()]) if (!BUNDLED[id] && !seen.has(id)) state.boards.delete(id);

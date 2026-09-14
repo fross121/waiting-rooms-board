@@ -23,12 +23,15 @@
   input[type=text], textarea { background: var(--bg); border: 1px solid var(--line2); border-radius: 4px; padding: 5px 8px; }
   header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
   header h1 { font-family: var(--display); font-size: 15px; letter-spacing: .04em; margin: 0; color: var(--accent); text-transform: uppercase; }
+  .places { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .places button { font-family: var(--display); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; padding: 5px 10px; }
+  .places button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   header h1 small { display: block; font-family: var(--body); font-size: 11px; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
   #boardName { width: 220px; }
   .status { font-family: var(--mono); font-size: 12px; color: var(--muted); }
   .status.ok { color: var(--accent); } .status.warn { color: var(--amber); } .status.bad { color: var(--red); }
   .spacer { flex: 1; }
-  main { display: grid; grid-template-columns: 236px minmax(320px, 1fr) 320px; gap: 0; min-height: calc(100vh - 62px); }
+  main { display: grid; grid-template-columns: 236px minmax(320px, 1fr) 320px; gap: 0; min-height: calc(100vh - 104px); }
   aside, .right { background: var(--panel); border-right: 1px solid var(--line); padding: 12px; overflow: auto; }
   .right { border-right: 0; border-left: 1px solid var(--line); }
   section { margin-bottom: 18px; }
@@ -77,22 +80,23 @@
 </style>
 
 <header>
-  <h1>Waiting Rooms Board<small>room templates for They Are Waiting</small></h1>
+  <h1>Waiting Rooms Board</h1>
   <label class="row">Board <input id="boardName" type="text" placeholder="name this board" autocomplete="off"></label>
   <label class="row">By <input id="authorName" type="text" placeholder="your name" size="10" autocomplete="off"></label>
   <span id="status" class="status">loading tiles…</span>
   <span class="spacer"></span>
   <button id="btnNew">New board</button>
-  <button id="btnDuplicate" title="Copy this board into a new one you own">Duplicate</button>
+  <button id="btnDuplicate" title="Copy this board into a new one">Duplicate</button>
   <button id="btnDelete" class="danger">Delete</button>
 </header>
 
+<nav id="places" class="places"></nav>
 <main>
   <aside>
     <section>
       <h2>Boards</h2>
       <div id="boards" class="list"></div>
-      <p id="cloudNote" class="help" hidden>Boards are kept in this browser. Download a board to keep it safe or to hand it on.</p>
+      <p id="cloudNote" hidden></p>
     </section>
     <section>
       <h2>Layers</h2>
@@ -109,18 +113,6 @@
         <button id="btnRedo">Redo<kbd>Ctrl Y</kbd></button>
         <button id="btnZoom">Zoom<kbd id="zoomLabel">8 px</kbd></button>
       </div>
-      <p class="help" style="margin:8px 0 0">Right-drag erases. Hold Shift to paint a straight run. 1-4 pick a layer. Drag on the tile sheet to pick a block of tiles at once.</p>
-    </section>
-    <section>
-      <h2>Rules of a room</h2>
-      <ul class="help" style="padding-left:16px;margin:0">
-        <li>One room per slot (16 by 24 cells, the dotted boxes). At least 10 cells.</li>
-        <li>Floor art on the storey's floor row with a cap at each end.</li>
-        <li>A doorway frame on any edge that joins another room; an end wall where the level stops.</li>
-        <li>Stairs make a stair room, which links storeys.</li>
-        <li>Base on the first layer, props on Decoration, near walls and things in front of the player on Foreground, exit signs on Signs.</li>
-        <li>Chests, backpacks and lockers painted from their sheets come alive in the game.</li>
-      </ul>
     </section>
   </aside>
 
@@ -152,12 +144,11 @@
         <button id="btnDownload" class="primary">Download for the game</button>
         <button id="btnCopyScene">Copy as scene text</button>
       </div>
-      <p class="help" style="margin:8px 0 0">The download is a <span style="font-family:var(--mono)">.json</span> board. Drop it into the game's <span style="font-family:var(--mono)">boards/</span> folder and its rooms are dealt with everyone else's. The scene text is the same board as a Godot scene, for pasting into a <span style="font-family:var(--mono)">.tscn</span> file.</p>
     </section>
     <section>
       <details>
-        <summary>Import a board (paste scene or board text)</summary>
-        <textarea id="importText" placeholder="paste the contents of a .tscn or a downloaded .json here"></textarea>
+        <summary>Import a board</summary>
+        <textarea id="importText" placeholder="paste a board here"></textarea>
         <div class="row" style="margin-top:6px"><button id="btnImport">Import as a new board</button></div>
       </details>
     </section>
@@ -180,6 +171,9 @@ const FLIP_H = 4096, FLIP_V = 8192, TRANSPOSE = 16384;
 const X0 = -1, Y0 = -9, COLS = 129, ROWS = 120;
 const ZOOMS = [4, 6, 8, 12, 16];
 const MAIN_ID = 'main-board';
+// THE PLACES a level can be: one page of boards each. Add a name here to add a page.
+const PLACES = ['Hospital', 'Police station', 'Construction site', 'Military base', "Willbee's", 'School', 'Port', 'Housing'];
+const MAIN_PLACE = 'Hospital';  // the game's own board is the hospital's
 
 const $ = id => document.getElementById(id);
 const els = {
@@ -225,10 +219,10 @@ function boardToDoc(b) {
   const layers = {};
   let n = 0;
   for (const L of LAYERS) { layers[L] = encodeLayer(b.layers[L]); n += b.layers[L].size; }
-  return {format: 'tawboard/1', name: b.name, author: b.author, layers, cells: n, updatedAt: new Date().toISOString()};
+  return {format: 'tawboard/1', name: b.name, author: b.author, place: b.place || MAIN_PLACE, layers, cells: n, updatedAt: new Date().toISOString()};
 }
 function docToBoard(id, d) {
-  const b = {id, name: d.name || id, author: d.author || '', layers: {}, updatedAt: d.updatedAt || ''};
+  const b = {id, name: d.name || id, author: d.author || '', place: d.place || (id === MAIN_ID ? MAIN_PLACE : PLACES[0]), layers: {}, updatedAt: d.updatedAt || ''};
   for (const L of LAYERS) b.layers[L] = decodeLayer(d.layers && d.layers[L]);
   return b;
 }
@@ -265,6 +259,7 @@ const state = {
   cur: null,                   // the open board (working copy)
   readOnly: false,
   layer: 'TileMapLayer', hidden: new Set(), tool: 'paint', zoom: 8,
+  place: PLACES[0],
   stamp: null,                 // {cells: [[dx,dy,src,ax,ay]], w, h, src}
   flags: 0, source: '0',
   undo: [], redo: [], stroke: null,
@@ -522,15 +517,17 @@ function renderLayers() {
 }
 function renderBoards() {
   els.boards.innerHTML = '';
-  const items = [...state.boards.entries()].sort((a, b) => (a[0] === MAIN_ID ? -1 : b[0] === MAIN_ID ? 1 : (b[1].updatedAt || '').localeCompare(a[1].updatedAt || '')));
+  const items = [...state.boards.entries()].filter(([id, m]) => (m.place || (id === MAIN_ID ? MAIN_PLACE : PLACES[0])) === state.place)
+    .sort((a, b) => (a[0] === MAIN_ID ? -1 : b[0] === MAIN_ID ? 1 : (b[1].updatedAt || '').localeCompare(a[1].updatedAt || '')));
+  if (!items.length) { const e = document.createElement('p'); e.className = 'help'; e.textContent = 'No boards yet.'; els.boards.appendChild(e); }
   for (const [id, m] of items) {
     const d = document.createElement('div');
     d.className = 'boardItem' + (state.cur && state.cur.id === id ? ' active' : '');
     const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = m.name || id;
     const by = document.createElement('span'); by.className = 'by'; by.textContent = m.author ? 'by ' + m.author : '';
     d.append(nm, by);
-    if (id === MAIN_ID) { const p = document.createElement('span'); p.className = 'pill'; p.textContent = 'reference'; d.appendChild(p); }
-    else if (m.busy) { const p = document.createElement('span'); p.className = 'pill lock'; p.textContent = 'in use'; d.appendChild(p); }
+    if (id === MAIN_ID) { const p = document.createElement('span'); p.className = 'pill'; p.textContent = 'the game\'s'; d.appendChild(p); }
+    if (m.busy) { const p = document.createElement('span'); p.className = 'pill lock'; p.textContent = 'in use'; d.appendChild(p); }
     d.addEventListener('click', () => openBoard(id));
     els.boards.appendChild(d);
   }
@@ -542,23 +539,24 @@ let toastT = 0;
 function toast(msg) { els.toast.textContent = msg; els.toast.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => els.toast.classList.remove('show'), 2600); }
 
 // ---------- boards: open / new / save ----------
-function blankBoard(id, name, author) { const b = {id, name, author, layers: {}, updatedAt: ''}; for (const L of LAYERS) b.layers[L] = new Map(); return b; }
+function blankBoard(id, name, author) { const b = {id, name, author, place: state.place, layers: {}, updatedAt: ''}; for (const L of LAYERS) b.layers[L] = new Map(); return b; }
 function slug(name) { return (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'board') + '-' + Math.random().toString(36).slice(2, 6); }
 async function openBoard(id) {
   await flushSave();
   releaseLease();
   let b;
-  if (id === MAIN_ID) { b = docToBoard(MAIN_ID, window.MAIN_BOARD); state.readOnly = true; }
-  else {
-    const d = await loadDoc(id);
-    if (!d) { toast('that board is gone'); state.boards.delete(id); renderBoards(); return; }
-    b = docToBoard(id, d);
-    state.readOnly = !(await takeLease(id));
-  }
+  // the game's own board is editable like any other: the saved copy when
+  // someone has changed it, the game's bundled one until then
+  let d = await loadDoc(id);
+  if (!d && id === MAIN_ID) d = window.MAIN_BOARD;
+  if (!d) { toast('that board is gone'); state.boards.delete(id); renderBoards(); return; }
+  b = docToBoard(id, d);
+  state.readOnly = !(await takeLease(id));
   state.cur = b; state.undo = []; state.redo = []; state.dirty = false;
+  if (PLACES.includes(b.place) && b.place !== state.place) { state.place = b.place; renderPlaces(); }
   els.boardName.value = b.name; els.boardName.disabled = state.readOnly;
   $('btnDelete').disabled = state.readOnly;
-  setStatus(id === MAIN_ID ? 'the game\'s own board - read-only, duplicate it to edit' : state.readOnly ? 'someone else is editing this board - read-only until they stop' : 'opened', state.readOnly ? 'warn' : '');
+  setStatus(state.readOnly ? 'someone else is editing this board - read-only until they stop' : 'opened', state.readOnly ? 'warn' : '');
   renderBoards(); renderLayers(); render();
 }
 async function newBoard(from) {
@@ -572,7 +570,7 @@ async function newBoard(from) {
   releaseLease();
   state.cur = b; state.readOnly = false; state.undo = []; state.redo = [];
   els.boardName.value = b.name; els.boardName.disabled = false; $('btnDelete').disabled = false;
-  state.boards.set(id, {name: b.name, author, updatedAt: new Date().toISOString(), cells: 0});
+  state.boards.set(id, {name: b.name, author, place: b.place, updatedAt: new Date().toISOString(), cells: 0});
   await saveNow();
   await takeLease(id);
   renderBoards(); renderLayers(); render();
@@ -581,13 +579,14 @@ els.boardName.addEventListener('change', () => { if (state.cur && !state.readOnl
 $('btnNew').addEventListener('click', () => newBoard(null));
 $('btnDuplicate').addEventListener('click', () => { if (state.cur) newBoard(state.cur); });
 $('btnDelete').addEventListener('click', async () => {
-  if (!state.cur || state.cur.id === MAIN_ID || state.readOnly) return;
-  if (!confirm(`Delete "${state.cur.name}" for everyone? This cannot be undone.`)) return;
+  if (!state.cur || state.readOnly) return;
+  if (!confirm(state.cur.id === MAIN_ID ? 'Throw away every change to the game\'s board and go back to the copy the game shipped with?' : `Delete "${state.cur.name}" for everyone? This cannot be undone.`)) return;
   const id = state.cur.id;
   clearTimeout(state.saveTimer); state.dirty = false;
   await deleteDoc(id);
   state.boards.delete(id); state.cur = null; releaseLease();
   els.boardName.value = ''; renderBoards(); renderLayers(); render(); setStatus('deleted', '');
+  if (id === MAIN_ID) { state.boards.set(MAIN_ID, {name: window.MAIN_BOARD.name, author: window.MAIN_BOARD.author, place: MAIN_PLACE, updatedAt: ''}); openBoard(MAIN_ID); }
 });
 
 function markDirty() {
@@ -598,10 +597,10 @@ function markDirty() {
 }
 async function flushSave() { clearTimeout(state.saveTimer); if (state.dirty) await saveNow(); }
 async function saveNow() {
-  if (!state.cur || state.readOnly || state.cur.id === MAIN_ID) return;
+  if (!state.cur || state.readOnly) return;
   state.dirty = false;
   const doc = boardToDoc(state.cur);
-  state.boards.set(state.cur.id, {...(state.boards.get(state.cur.id) || {}), name: doc.name, author: doc.author, updatedAt: doc.updatedAt, cells: doc.cells});
+  state.boards.set(state.cur.id, {...(state.boards.get(state.cur.id) || {}), name: doc.name, author: doc.author, place: doc.place, updatedAt: doc.updatedAt, cells: doc.cells});
   try {
     setStatus('saving…', '');
     await storeDoc(state.cur.id, doc);
@@ -649,13 +648,14 @@ function onStoreChange(docs) {
   for (const d of docs) {
     const m = d.data || {};
     seen.add(d.id);
-    state.boards.set(d.id, {...(state.boards.get(d.id) || {}), name: m.name, author: m.author, updatedAt: m.updatedAt, cells: m.cells});
+    state.boards.set(d.id, {...(state.boards.get(d.id) || {}), name: m.name, author: m.author, place: m.place, updatedAt: m.updatedAt, cells: m.cells});
     // another editor's live changes to the board we are only reading
     if (state.cur && state.cur.id === d.id && state.readOnly && !d.pending) {
       const b = docToBoard(d.id, m); state.cur.layers = b.layers; state.cur.name = b.name; els.boardName.value = b.name; render(); renderLayers();
     }
   }
   for (const id of [...state.boards.keys()]) if (id !== MAIN_ID && !seen.has(id)) state.boards.delete(id);
+  if (!seen.has(MAIN_ID)) state.boards.set(MAIN_ID, {...state.boards.get(MAIN_ID), place: MAIN_PLACE});
   renderBoards();
 }
 
@@ -664,7 +664,7 @@ $('btnDownload').addEventListener('click', async () => {
   if (!state.cur) return;
   const doc = boardToDoc(state.cur);
   const text = JSON.stringify(doc);
-  const filename = (state.cur.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'board') + '.json';
+  const filename = ((state.cur.place + ' ' + state.cur.name).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'board') + '.json';
   try { toast(await store.download(filename, text)); }
   catch (e) {
     if (e && e.code === 'declined') return;
@@ -719,8 +719,16 @@ window.addEventListener('keydown', ev => {
 window.addEventListener('beforeunload', ev => { if (state.dirty) { flushSave(); ev.preventDefault(); ev.returnValue = ''; } });
 
 // ---------- boot ----------
-buildTabs(); renderLayers(); syncTools(); syncFlags(); updateStampInfo();
-state.boards.set(MAIN_ID, {name: window.MAIN_BOARD.name, author: window.MAIN_BOARD.author, updatedAt: ''});
+function renderPlaces() {
+  const nav = $('places'); nav.innerHTML = '';
+  for (const pl of PLACES) {
+    const b = document.createElement('button'); b.textContent = pl; b.className = pl === state.place ? 'on' : '';
+    b.addEventListener('click', () => { state.place = pl; renderPlaces(); renderBoards(); });
+    nav.appendChild(b);
+  }
+}
+buildTabs(); renderLayers(); syncTools(); syncFlags(); updateStampInfo(); renderPlaces();
+state.boards.set(MAIN_ID, {name: window.MAIN_BOARD.name, author: window.MAIN_BOARD.author, place: MAIN_PLACE, updatedAt: ''});
 renderBoards();
 window.BOARD_CURRENT_ID = () => (state.cur ? state.cur.id : null);
 (async () => {

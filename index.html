@@ -706,7 +706,7 @@ async function newBoard(from) {
   const author = els.authorName.value.trim() || 'someone';
   const name = prompt('Name the new board', from ? from.name + ' copy' : author + "'s rooms");
   if (!name) return;
-  let sw = from ? (from.slotW || 16) : Number(prompt('Box width in cells: 16, 24 or 32', '16'));
+  let sw = from ? (from.slotW || 16) : Number(prompt('Box width in cells: 16, 24 or 32', '32'));
   if (!SLOT_WIDTHS.includes(sw)) { toast('the box width must be 16, 24 or 32'); return; }
   const id = slug(name);
   const b = blankBoard(id, name.trim(), author, sw);

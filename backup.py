@@ -65,6 +65,8 @@ for sid, s in sheets:
     if png:
         with open(os.path.join(OUT, "sheets", stem + ".png"), "wb") as f:
             f.write(base64.b64decode(png))
+    if isinstance(s.get("tiles"), list):  # stored as "x,y" strings (no nested arrays in Firestore)
+        s["tiles"] = [[int(a) for a in t.split(",")] if isinstance(t, str) else t for t in s["tiles"]]
     with open(os.path.join(OUT, "sheets", stem + ".json"), "w") as f:
         json.dump({k: v for k, v in s.items()}, f, separators=(",", ":"))
 print("backed up %d boards and %d sheets into backups/" % (len(boards), len(sheets)))

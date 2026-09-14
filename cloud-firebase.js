@@ -56,17 +56,18 @@
         for (const d of snap.docs) {
           const m = d.data();
           const ch = await d.ref.collection('chunks').orderBy('n').get();
-          out.push({id: d.id, meta: {name: m.name, region: m.region, tiles: m.tiles, width: m.width, height: m.height}, png: ch.docs.map(c => c.data().data).join('')});
+          out.push({id: d.id, meta: {name: m.name, region: m.region, tiles: (m.tiles || []).map(t => typeof t === 'string' ? t.split(',').map(Number) : t), width: m.width, height: m.height}, png: ch.docs.map(c => c.data().data).join('')});
         }
         return out;
       },
+      // (the tile pairs go in as "x,y" strings: the store refuses nested arrays)
       async saveSheet(sid, src) {
         const CH = 700000;
         const ref = db.collection('sheets').doc(String(sid));
         const old = await ref.collection('chunks').get();
         for (const c of old.docs) await c.ref.delete();
         for (let i = 0, n = 0; i < src.png.length; i += CH, n++) await ref.collection('chunks').doc('c' + String(n).padStart(3, '0')).set({n, data: src.png.slice(i, i + CH)});
-        await ref.set({name: src.name || '', region: src.region, tiles: src.tiles, width: src.width, height: src.height, updatedAt: new Date().toISOString()});
+        await ref.set({name: src.name || '', region: src.region, tiles: src.tiles.map(t => t[0] + ',' + t[1]), width: src.width, height: src.height, updatedAt: new Date().toISOString()});
       },
       async download(filename, text) {
         const a = document.createElement('a');

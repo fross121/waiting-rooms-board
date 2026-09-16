@@ -189,12 +189,12 @@ const LAYERS = ['TileMapLayer', 'Decoration', 'Background3', 'Background4', 'For
 const LAYER_LABEL = {TileMapLayer: 'Background 1 (behind the player)', Decoration: 'Background 2 (behind the player)', Background3: 'Background 3 (behind the player)', Background4: 'Background 4 (behind the player)', Foreground: 'Foreground 1 (in front of the player)', Foreground2: 'Foreground 2 (in front of the player)'};
 const LAYER_Z = {TileMapLayer: -1, Decoration: -1, Background3: -1, Background4: -1, Foreground: 13, Foreground2: 13};
 const LAYER_ALIAS = {Signs: 'Foreground2'};  // older boards and scenes
-const SOURCE_LABEL = {0: 'Assets', 1: 'Lights', 2: 'Scaffold', 3: 'Ward lockers', 6: 'Med chest', 7: 'Backpack', 8: 'Old lockers', 9: 'Padlocks', 10: 'Old facility', 11: 'Fridge', 12: 'Large locker', 13: 'Small locker'};
+const SOURCE_LABEL = {0: 'Assets', 1: 'Lights', 2: 'Scaffold', 6: 'Med chest', 7: 'Backpack', 9: 'Padlocks', 10: 'Old facility', 11: 'Fridge', 12: 'Large locker', 13: 'Small locker'};
 const FLIP_H = 4096, FLIP_V = 8192, TRANSPOSE = 16384;
 // sheets the game keeps for its own purposes but nobody paints rooms from
-// (the old locker sheets stay so older boards still load; the game stands
-// the new lockers in their place)
-const HIDDEN_SOURCES = ['2', '10', '3', '8'];
+// (the old locker sheets are gone: a board that still paints them has the
+// game stand the new lockers in their place)
+const HIDDEN_SOURCES = ['2', '10'];
 // sheets where only some cells are for painting: the padlock's shut face -
 // the game swaps in its sprung face and the two silhouettes itself
 const ONLY_TILES = {'9': [[0, 1]]};

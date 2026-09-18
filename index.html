@@ -402,22 +402,28 @@ async function loadCustomSheets() {
   if (sheets.length) buildTabs();
 }
 
+// WHERE AN OVERSIZED TILE ACTUALLY HANGS. Godot draws a tile CENTRED on its
+// cell and then pushes it back by the tile's `texture_origin`, so the art's
+// top-left lands at cell_corner + (32 - rw/2 - ox, 32 - rh/2 - oy). For the
+// three-cell sheets that works out as: the lockers stand in their own column
+// with their head two cells up, and the FRIDGE - two cells wide, origin
+// (32,64) - hangs two cells up and one cell LEFT. It is not centred and it
+// does not spill to the right; drawing it that way put every fridge on this
+// board a cell across from where the game stands it. These are the tileset's
+// own origins, so the board shows what play shows.
+// (An ordinary 64x64 tile with no origin comes out at 0,0 - unchanged.)
+const TEX_ORIGIN = {6: [0, 0], 11: [32, 64], 12: [0, 64], 13: [0, 64]};
+
 // ---------- drawing one tile ----------
 function drawTile(c, sid, ax, ay, alt, dx, dy, z) {
   const img = images[sid], s = TILESET.sources[sid];
   if (!img || !img.complete || !s) return;
   const [rw, rh] = s.region;
   const w = z * rw / 64, h = z * rh / 64;
+  const [ox, oy] = TEX_ORIGIN[sid] || [0, 0];
   c.save();
-  // A TILE BIGGER THAN ITS CELL STANDS ON IT. Godot grows an oversized atlas
-  // tile UP and to the RIGHT of the cell it is set in, so a locker or a
-  // fridge (64x192 and 128x192, three cells tall) has its FOOT in the cell
-  // and its head two cells above. Hanging it downward from the cell, the way
-  // this used to, drew it three cells below where the game puts it - which
-  // is why a locker painted on the floor here turned up in the ceiling in
-  // play. An ordinary 64x64 tile is unaffected: h is z, and this is the same
-  // spot it always had.
-  c.translate(dx + w / 2, dy + z - h / 2);
+  c.translate(dx + (32 - rw / 2 - ox) * z / 64 + w / 2,
+              dy + (32 - rh / 2 - oy) * z / 64 + h / 2);
   if (alt & FLIP_H) c.scale(-1, 1);
   if (alt & FLIP_V) c.scale(1, -1);
   if (alt & TRANSPOSE) c.transform(0, 1, 1, 0, 0, 0);

@@ -111,6 +111,7 @@
       <h2>Layers</h2>
       <div id="layers" class="list"></div>
       <label class="row help" style="margin-top:6px"><input id="dimOthers" type="checkbox" checked> dim the other layers</label>
+      <label class="row help"><input id="gameLight" type="checkbox"> game lighting (how dark it really is)</label>
     </section>
     <section>
       <h2>Tools</h2>
@@ -221,7 +222,7 @@ const els = {
   board: $('board'), wrap: $('canvasWrap'), coord: $('coord'), palette: $('palette'), palWrap: $('palWrap'),
   tabs: $('tabs'), stampPreview: $('stampPreview'), stampInfo: $('stampInfo'), boards: $('boards'), layers: $('layers'),
   status: $('status'), boardName: $('boardName'), authorName: $('authorName'), toast: $('toast'), cloudNote: $('cloudNote'),
-  importText: $('importText'), dimOthers: $('dimOthers'),
+  importText: $('importText'), dimOthers: $('dimOthers'), gameLight: $('gameLight'),
 };
 const ctx = els.board.getContext('2d');
 const pctx = els.palette.getContext('2d');
@@ -408,12 +409,71 @@ function drawTile(c, sid, ax, ay, alt, dx, dy, z) {
   const [rw, rh] = s.region;
   const w = z * rw / 64, h = z * rh / 64;
   c.save();
-  c.translate(dx + w / 2, dy + h / 2);
+  // A TILE BIGGER THAN ITS CELL STANDS ON IT. Godot grows an oversized atlas
+  // tile UP and to the RIGHT of the cell it is set in, so a locker or a
+  // fridge (64x192 and 128x192, three cells tall) has its FOOT in the cell
+  // and its head two cells above. Hanging it downward from the cell, the way
+  // this used to, drew it three cells below where the game puts it - which
+  // is why a locker painted on the floor here turned up in the ceiling in
+  // play. An ordinary 64x64 tile is unaffected: h is z, and this is the same
+  // spot it always had.
+  c.translate(dx + w / 2, dy + z - h / 2);
   if (alt & FLIP_H) c.scale(-1, 1);
   if (alt & FLIP_V) c.scale(1, -1);
   if (alt & TRANSPOSE) c.transform(0, 1, 1, 0, 0, 0);
   c.drawImage(img, ax * rw, ay * rh, rw, rh, -w / 2, -h / 2, w, h);
   c.restore();
+}
+
+// ---------- what the game's lighting does to all this ----------
+// The editor paints every tile at full brightness; the GAME drops the whole
+// level to an ambient tint and only the fixtures paint their way back out of
+// it, which is why a room reads so much darker in play than on the board.
+// These are lighting.gd's own numbers, so the preview is the real thing:
+// `darkness`, `light_energy` / `light_scale` (a lamp's reach is 128 * scale
+// world px, and a cell is 64), and each fixture's lit face and tint.
+const GAME_DARK = [0.19, 0.20, 0.25];            // lighting.gd `darkness`
+const LIT_FIXTURES = [
+  // [source, ax, ay, [r,g,b], energy, reach in cells]
+  ['0', 21, 25, [1.00, 0.78, 0.30], 0.8, 5.2],   // bulb, burning
+  ['0', 21, 26, [1.00, 0.78, 0.30], 0.8, 5.2],
+  ['0', 15, 25, [1.00, 0.66, 0.34], 0.8, 5.2],   // strip tube, burning
+  ['0', 15, 26, [1.00, 0.66, 0.34], 0.8, 5.2],
+  ['0', 23, 26, [1.00, 0.32, 0.34], 0.4, 2.0],   // exit sign
+  ['0', 14, 23, [0.72, 0.84, 1.00], 0.3, 1.6],   // televisions
+  ['0', 15, 23, [0.72, 0.84, 1.00], 0.3, 1.6],
+  ['0', 16, 23, [0.72, 0.84, 1.00], 0.3, 1.6],
+  ['0', 16, 24, [0.72, 0.84, 1.00], 0.3, 1.6],
+];
+function litFixture(sid, ax, ay) {
+  for (const f of LIT_FIXTURES) if (f[0] === String(sid) && f[1] === ax && f[2] === ay) return f;
+  return null;
+}
+// Darken everything that was painted, then let every burning fixture on the
+// board wash its own pool back in.
+function applyGameLight(ctx, b, z, x0c, x1c, y0c, y1c, vw, vh, ox, oy) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = `rgb(${Math.round(GAME_DARK[0] * 255)},${Math.round(GAME_DARK[1] * 255)},${Math.round(GAME_DARK[2] * 255)})`;
+  ctx.fillRect(ox, oy, vw, vh);
+  ctx.globalCompositeOperation = 'lighter';
+  if (b) for (const L of LAYERS) {
+    if (state.hidden.has(L)) continue;
+    for (const [k, t] of b.layers[L]) {
+      const f = litFixture(t[0], t[1], t[2]);
+      if (!f) continue;
+      const [x, y] = k.split(',').map(Number);
+      if (x < x0c - 8 || x > x1c + 8 || y < y0c - 8 || y > y1c + 8) continue;
+      const cx = (x - X0) * z + z / 2, cy = (y - Y0) * z + z / 2, r = f[5] * z;
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      const [cr, cg, cb] = f[3], e = f[4];
+      g.addColorStop(0, `rgba(${Math.round(cr * 255)},${Math.round(cg * 255)},${Math.round(cb * 255)},${e})`);
+      g.addColorStop(1, `rgba(${Math.round(cr * 255)},${Math.round(cg * 255)},${Math.round(cb * 255)},0)`);
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.restore();
 }
 
 // ---------- the board canvas ----------
@@ -460,6 +520,7 @@ function paintBoard() {
     }
     ctx.globalAlpha = 1;
   }
+  if (els.gameLight.checked) applyGameLight(ctx, b, z, x0c, x1c, y0c, y1c, vw, vh, ox, oy);
   // slot boxes only where a room is painted, plus the slot under the cursor
   const used = new Set();
   if (b) for (const L of LAYERS) for (const k of b.layers[L].keys()) { const [x, y] = k.split(',').map(Number); used.add(slotOf(x, y)); }
@@ -955,6 +1016,7 @@ for (const z of ZOOMS) { const o = document.createElement('option'); o.value = z
 $('zoomSel').addEventListener('change', () => setZoom(Number($('zoomSel').value)));
 $('palSel').addEventListener('change', () => setPalScale(Number($('palSel').value)));
 els.dimOthers.addEventListener('change', render);
+els.gameLight.addEventListener('change', render);
 els.wrap.addEventListener('scroll', render);
 // the side panels: drag the handles; double-click one to put it back
 (() => {

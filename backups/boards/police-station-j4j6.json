@@ -1,1 +1,1 @@
-{"format":"tawboard/1","cells":0,"name":"Police station","updatedAt":"2026-09-14T15:38:17.951Z","layers":{"Background3":"AAA=","Background4":"AAA=","Foreground2":"AAA=","TileMapLayer":"AAA=","Foreground":"AAA=","Decoration":"AAA="},"slot_w":16,"place":"Police station","author":"someone"}
+{"format":"tawboard/1","name":"Police station","author":"someone","cells":0,"updatedAt":"2026-09-14T15:38:17.951Z","place":"Police station","layers":{"TileMapLayer":"AAA=","Decoration":"AAA=","Foreground":"AAA=","Foreground2":"AAA=","Background4":"AAA=","Background3":"AAA="},"slot_w":16}

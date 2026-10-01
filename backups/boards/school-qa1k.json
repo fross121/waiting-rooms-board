@@ -1,1 +1,1 @@
-{"layers":{"Foreground":"AAA=","Signs":"AAA=","TileMapLayer":"AAA=","Decoration":"AAA="},"updatedAt":"2026-09-14T14:45:51.877Z","place":"School","cells":0,"author":"someone","name":"School","slot_w":16,"format":"tawboard/1"}
+{"layers":{"TileMapLayer":"AAA=","Decoration":"AAA=","Foreground":"AAA=","Signs":"AAA="},"cells":0,"format":"tawboard/1","place":"School","updatedAt":"2026-09-14T14:45:51.877Z","slot_w":16,"author":"someone","name":"School"}

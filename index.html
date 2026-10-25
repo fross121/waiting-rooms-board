@@ -72,6 +72,13 @@
   .stampBox { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
   #stampPreview { image-rendering: pixelated; background: #0d0e12; border: 1px solid var(--line); }
   .flags button { min-width: 44px; font-family: var(--mono); }
+  .tiers button { min-width: 56px; font-family: var(--mono); }
+  .tiers button.green.on { background: #243a22; border-color: #9ef080; color: #9ef080; }
+  .tiers button.yellow.on { background: #3d3017; border-color: var(--amber); color: var(--amber); }
+  .tiers button.red.on { background: #3d2220; border-color: var(--red); color: var(--red); }
+  .tierList { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 6px; }
+  .tierList b { font-weight: 500; text-transform: uppercase; }
+  .tierList .green { color: #9ef080; } .tierList .yellow { color: var(--amber); } .tierList .red { color: var(--red); }
   .help { font-size: 12px; color: var(--muted); }
   .help li { margin-bottom: 4px; }
   textarea { width: 100%; height: 96px; font-family: var(--mono); font-size: 11px; resize: vertical; }
@@ -124,6 +131,17 @@
         <label class="row" style="grid-column: span 3; justify-content: space-between">Zoom <select id="zoomSel"></select></label>
         <label class="row" style="grid-column: span 3; justify-content: space-between">Tile sheet <select id="palSel"><option value="0.25">¼</option><option value="0.34">⅓</option><option value="0.5" selected>½</option><option value="0.75">¾</option><option value="1">1×</option><option value="1.5">1½×</option><option value="2">2×</option><option value="3">3×</option></select></label>
       </div>
+    </section>
+    <section>
+      <h2>Room difficulty</h2>
+      <div class="row wrap tiers">
+        <button id="tierGreen" class="green" title="tag the room you click green">Green</button>
+        <button id="tierYellow" class="yellow" title="tag the room you click yellow">Yellow</button>
+        <button id="tierRed" class="red" title="tag the room you click red">Red</button>
+        <button id="tierClear" title="take the tag off the room you click">Clear</button>
+      </div>
+      <p class="help" style="margin:6px 0 0">Pick a colour, then click a room on the board (right-click clears it). A label only for now: the game does nothing with it yet.</p>
+      <div id="tierList" class="tierList"></div>
     </section>
   </aside>
 
@@ -190,7 +208,7 @@ const LAYERS = ['TileMapLayer', 'Decoration', 'Background3', 'Background4', 'For
 const LAYER_LABEL = {TileMapLayer: 'Background 1 (behind the player)', Decoration: 'Background 2 (behind the player)', Background3: 'Background 3 (behind the player)', Background4: 'Background 4 (behind the player)', Foreground: 'Foreground 1 (in front of the player)', Foreground2: 'Foreground 2 (in front of the player)'};
 const LAYER_Z = {TileMapLayer: -1, Decoration: -1, Background3: -1, Background4: -1, Foreground: 13, Foreground2: 13};
 const LAYER_ALIAS = {Signs: 'Foreground2'};  // older boards and scenes
-const SOURCE_LABEL = {0: 'Assets', 1: 'Lights', 2: 'Scaffold', 6: 'Med chest', 7: 'Backpack', 9: 'Padlocks', 10: 'Old facility', 11: 'Fridge', 12: 'Large locker', 13: 'Small locker'};
+const SOURCE_LABEL = {0: 'Assets', 1: 'Lights', 2: 'Scaffold', 6: 'Med chest', 7: 'Backpack', 9: 'Padlocks', 10: 'Old facility', 11: 'Fridge', 12: 'Large locker', 13: 'Small locker', 14: 'Halftone wall', 15: 'Solid wall', 16: 'Valetta', 17: 'First aid box'};
 const FLIP_H = 4096, FLIP_V = 8192, TRANSPOSE = 16384;
 // sheets the game keeps for its own purposes but nobody paints rooms from
 // (the old locker sheets are gone: a board that still paints them has the
@@ -201,6 +219,10 @@ const HIDDEN_SOURCES = ['2', '10'];
 const ONLY_TILES = {'9': [[0, 1]]};
 // cells never offered: the sheet's stray second lit EXIT face (the sign lives at 22,26 / 23,26)
 const EXCLUDE_TILES = {'0': [[16, 18]]};
+// ROOM DIFFICULTY: a colour on a room's slot - green, yellow or red - kept
+// with the board ("tiers": room number -> colour) and in the file the game
+// downloads. A label only, so far: the game reads past it.
+const TIERS = {green: '#9ef080', yellow: '#f0b357', red: '#e0705f'};
 // the board: 8 by 9 slots of 16 by 24 cells; the dealer splits slots between
 // columns 16k-2 and 16k-1 and rows 24k-10 and 24k-9
 const SLOT_ROWS = 9;
@@ -264,10 +286,12 @@ function boardToDoc(b) {
   const layers = {};
   let n = 0;
   for (const L of LAYERS) { layers[L] = encodeLayer(b.layers[L]); n += b.layers[L].size; }
-  return {format: 'tawboard/1', name: b.name, author: b.author, place: b.place || PLACES[0], slot_w: b.slotW || 16, layers, cells: n, updatedAt: new Date().toISOString()};
+  return {format: 'tawboard/1', name: b.name, author: b.author, place: b.place || PLACES[0], slot_w: b.slotW || 16, tiers: Object.assign({}, b.tiers || {}), layers, cells: n, updatedAt: new Date().toISOString()};
 }
+// the room tags a file carries, room number -> colour, anything else dropped
+function tiersOf(t) { const out = {}; if (t && typeof t === 'object') for (const k in t) if (TIERS[t[k]] && Number(k) > 0) out[String(Number(k))] = t[k]; return out; }
 function docToBoard(id, d) {
-  const b = {id, name: d.name || id, author: d.author || '', place: d.place || (BUNDLED[id] ? BUNDLED[id].place : PLACES[0]), slotW: Number(d.slot_w) || 16, layers: {}, updatedAt: d.updatedAt || ''};
+  const b = {id, name: d.name || id, author: d.author || '', place: d.place || (BUNDLED[id] ? BUNDLED[id].place : PLACES[0]), slotW: Number(d.slot_w) || 16, tiers: tiersOf(d.tiers), layers: {}, updatedAt: d.updatedAt || ''};
   for (const L of LAYERS) b.layers[L] = decodeLayer(d.layers && (d.layers[L] || (Object.keys(LAYER_ALIAS).find(k => LAYER_ALIAS[k] === L) && d.layers[Object.keys(LAYER_ALIAS).find(k => LAYER_ALIAS[k] === L)])));
   return b;
 }
@@ -287,7 +311,7 @@ function parseImport(text) {
   if (text.startsWith('{')) {
     const d = JSON.parse(text);
     if (!d.layers) throw new Error('that JSON has no layers');
-    return {name: d.name || 'Imported board', layers: d.layers, slotW: Number(d.slot_w) || 16};
+    return {name: d.name || 'Imported board', layers: d.layers, slotW: Number(d.slot_w) || 16, tiers: d.tiers};
   }
   const layers = {};
   const re = /\[node name="(\w+)" type="TileMapLayer"[^\]]*\][^\[]*?tile_map_data = PackedByteArray\("([^"]*)"\)/g;
@@ -307,6 +331,7 @@ const state = {
   place: PLACES[0],
   stamp: null,                 // {cells: [[dx,dy,src,ax,ay]], w, h, src}
   flags: 0, source: '0',
+  tier: 'green',               // the colour the tag tool paints (null clears)
   undo: [], redo: [], stroke: null,
   hover: null, dirty: false, saveTimer: 0, retryTimer: 0,
 };
@@ -533,14 +558,21 @@ function paintBoard() {
   // slot boxes only where a room is painted, plus the slot under the cursor
   const used = new Set();
   if (b) for (const L of LAYERS) for (const k of b.layers[L].keys()) { const [x, y] = k.split(',').map(Number); used.add(slotOf(x, y)); }
+  if (b) for (const n in b.tiers) used.add(((Number(n) - 1) % 8) + ',' + Math.floor((Number(n) - 1) / 8));  // a tagged room shows its box even unpainted
   if (state.hover) used.add(slotOf(state.hover.x, state.hover.y));
-  ctx.strokeStyle = 'rgba(158,240,128,.28)'; ctx.setLineDash([z / 2, z / 2]); ctx.lineWidth = 1;
-  ctx.fillStyle = 'rgba(158,240,128,.55)'; ctx.font = `${Math.max(9, z)}px "IBM Plex Mono", monospace`; ctx.textBaseline = 'top';
+  ctx.setLineDash([z / 2, z / 2]); ctx.lineWidth = 1;
+  ctx.font = `${Math.max(9, z)}px "IBM Plex Mono", monospace`; ctx.textBaseline = 'top';
   for (const sk of used) {
     const [sx, sy] = sk.split(',').map(Number);
+    const n = sy * 8 + sx + 1, tier = b ? b.tiers[n] : null;
     const x = (sw * sx - 1 - X0) * z + .5, y = (24 * sy - 9 - Y0) * z + .5;
-    ctx.strokeRect(x, y, sw * z, 24 * z);
-    if (z >= 6) ctx.fillText('Room ' + (sy * 8 + sx + 1), x + 2, y + 2);
+    if (tier) {
+      // its difficulty: a wash over the room and a solid frame in the colour
+      ctx.setLineDash([]); ctx.globalAlpha = .14; ctx.fillStyle = TIERS[tier]; ctx.fillRect(x, y, sw * z, 24 * z); ctx.globalAlpha = 1;
+      ctx.strokeStyle = TIERS[tier]; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, sw * z - 2, 24 * z - 2); ctx.lineWidth = 1; ctx.setLineDash([z / 2, z / 2]);
+    } else { ctx.strokeStyle = 'rgba(158,240,128,.28)'; ctx.strokeRect(x, y, sw * z, 24 * z); }
+    ctx.fillStyle = tier ? TIERS[tier] : 'rgba(158,240,128,.55)';
+    if (z >= 6) ctx.fillText('Room ' + n + (tier ? ' · ' + tier.toUpperCase() : ''), x + 2, y + 2);
   }
   ctx.setLineDash([]);
   // hover: the stamp's footprint
@@ -552,6 +584,10 @@ function paintBoard() {
       ctx.globalAlpha = 1;
       ctx.strokeStyle = '#9ef080';
       ctx.strokeRect((x - X0) * z + .5, (y - Y0) * z + .5, state.stamp.w * z - 1, state.stamp.h * z - 1);
+    } else if (state.tool === 'tag') {
+      const [sx, sy] = slotOf(x, y).split(',').map(Number);
+      ctx.strokeStyle = state.tier ? TIERS[state.tier] : '#7fc4ff'; ctx.lineWidth = 2;
+      ctx.strokeRect((sw * sx - 1 - X0) * z + 1.5, (24 * sy - 9 - Y0) * z + 1.5, sw * z - 3, 24 * z - 3); ctx.lineWidth = 1;
     } else {
       ctx.strokeStyle = state.tool === 'erase' ? '#e0705f' : '#7fc4ff';
       ctx.strokeRect((x - X0) * z + .5, (y - Y0) * z + .5, z - 1, z - 1);
@@ -655,6 +691,14 @@ function applyStamp(x, y) {
   for (const [dx, dy, s, ax, ay] of state.stamp.cells) setCell(state.layer, x + dx, y + dy, [s, ax, ay, state.flags]);
 }
 function eraseAt(x, y) { setCell(state.layer, x, y, null); }
+function putTier(n, tier) { if (tier) state.cur.tiers[n] = tier; else delete state.cur.tiers[n]; }
+function setTier(n, tier) {
+  const before = state.cur.tiers[n] || null;
+  if (before === (tier || null)) return;
+  putTier(n, tier);
+  state.undo.push([{tier: n, before, after: tier || null}]); if (state.undo.length > 200) state.undo.shift(); state.redo = [];
+  markDirty(); renderTiers(); render();
+}
 function pickAt(x, y) {
   // the topmost painted layer under the cursor, the active one first
   const order = [state.layer, ...LAYERS.slice().reverse().filter(L => L !== state.layer)];
@@ -700,7 +744,11 @@ els.board.addEventListener('mousedown', ev => {
   if (!state.cur) return;
   const c = cellAt(ev);
   if (state.readOnly) { if (ev.button === 0) toast('someone else is editing this board - you are watching it live; duplicate it to work on a copy'); return; }
-  if (ev.button === 2 || state.tool === 'erase') { beginStroke('erase'); strokeTo(c); }
+  if (state.tool === 'tag' && (ev.button === 0 || ev.button === 2)) {
+    const [sx, sy] = slotOf(c.x, c.y).split(',').map(Number);
+    setTier(sy * 8 + sx + 1, ev.button === 2 ? null : state.tier);
+  }
+  else if (ev.button === 2 || state.tool === 'erase') { beginStroke('erase'); strokeTo(c); }
   else if (ev.button === 0 && state.tool === 'pick') pickAt(c.x, c.y);
   else if (ev.button === 0 && state.tool === 'paint') {
     if (!state.stamp) { toast('pick a tile from the sheet first'); return; }
@@ -713,12 +761,13 @@ els.board.addEventListener('mousemove', ev => {
   state.hover = c;
   const [sx, sy] = slotOf(c.x, c.y).split(',').map(Number);
   const t = state.cur ? state.cur.layers[state.layer].get(key(c.x, c.y)) : null;
-  els.coord.textContent = `cell ${c.x}, ${c.y}  ·  Room ${sy * 8 + sx + 1}` + (t ? `  ·  ${sourceName(String(t[0]))} (${t[1]}, ${t[2]})` : '');
+  const tier = state.cur ? state.cur.tiers[sy * 8 + sx + 1] : null;
+  els.coord.textContent = `cell ${c.x}, ${c.y}  ·  Room ${sy * 8 + sx + 1}` + (tier ? ' · ' + tier : '') + (t ? `  ·  ${sourceName(String(t[0]))} (${t[1]}, ${t[2]})` : '');
   if (state.stroke) strokeTo(c); else render();
 });
 els.board.addEventListener('mouseleave', () => { state.hover = null; render(); });
-function undo() { const s = state.undo.pop(); if (!s) return; for (let i = s.length - 1; i >= 0; i--) { const e = s[i]; const m = state.cur.layers[e.L]; if (e.before) m.set(e.k, e.before); else m.delete(e.k); } state.redo.push(s); markDirty(); render(); }
-function redo() { const s = state.redo.pop(); if (!s) return; for (const e of s) { const m = state.cur.layers[e.L]; if (e.after) m.set(e.k, e.after); else m.delete(e.k); } state.undo.push(s); markDirty(); render(); }
+function undo() { const s = state.undo.pop(); if (!s) return; for (let i = s.length - 1; i >= 0; i--) { const e = s[i]; if (e.tier !== undefined) { putTier(e.tier, e.before); continue; } const m = state.cur.layers[e.L]; if (e.before) m.set(e.k, e.before); else m.delete(e.k); } state.redo.push(s); markDirty(); renderTiers(); render(); }
+function redo() { const s = state.redo.pop(); if (!s) return; for (const e of s) { if (e.tier !== undefined) { putTier(e.tier, e.after); continue; } const m = state.cur.layers[e.L]; if (e.after) m.set(e.k, e.after); else m.delete(e.k); } state.undo.push(s); markDirty(); renderTiers(); render(); }
 
 // ---------- panels ----------
 function renderLayers() {
@@ -752,14 +801,28 @@ function renderBoards() {
     els.boards.appendChild(d);
   }
 }
-function syncTools() { for (const t of ['paint', 'erase', 'pick']) $('tool' + t[0].toUpperCase() + t.slice(1)).classList.toggle('on', state.tool === t); }
+function syncTools() {
+  for (const t of ['paint', 'erase', 'pick']) $('tool' + t[0].toUpperCase() + t.slice(1)).classList.toggle('on', state.tool === t);
+  for (const t of ['green', 'yellow', 'red']) $('tier' + t[0].toUpperCase() + t.slice(1)).classList.toggle('on', state.tool === 'tag' && state.tier === t);
+  $('tierClear').classList.toggle('on', state.tool === 'tag' && !state.tier);
+}
+// the board's tagged rooms, by colour
+function renderTiers() {
+  const el = $('tierList'), b = state.cur;
+  if (!b) { el.textContent = ''; return; }
+  const by = {green: [], yellow: [], red: []};
+  for (const n of Object.keys(b.tiers).map(Number).sort((p, q) => p - q)) if (by[b.tiers[n]]) by[b.tiers[n]].push('Room ' + n);
+  el.innerHTML = Object.keys(by).some(t => by[t].length)
+    ? Object.keys(by).map(t => `<div><b class="${t}">${t}</b> ${by[t].length ? by[t].join(', ') : '–'}</div>`).join('')
+    : 'no rooms tagged on this board';
+}
 function syncFlags() { $('flagH').classList.toggle('on', !!(state.flags & FLIP_H)); $('flagV').classList.toggle('on', !!(state.flags & FLIP_V)); $('flagT').classList.toggle('on', !!(state.flags & TRANSPOSE)); }
 function setStatus(text, cls) { els.status.textContent = text; els.status.className = 'status ' + (cls || ''); }
 let toastT = 0;
 function toast(msg) { els.toast.textContent = msg; els.toast.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => els.toast.classList.remove('show'), 2600); }
 
 // ---------- boards: open / new / save ----------
-function blankBoard(id, name, author, slotW) { const b = {id, name, author, place: state.place, slotW: slotW || 16, layers: {}, updatedAt: ''}; for (const L of LAYERS) b.layers[L] = new Map(); return b; }
+function blankBoard(id, name, author, slotW) { const b = {id, name, author, place: state.place, slotW: slotW || 16, tiers: {}, layers: {}, updatedAt: ''}; for (const L of LAYERS) b.layers[L] = new Map(); return b; }
 function slug(name) { return (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'board') + '-' + Math.random().toString(36).slice(2, 6); }
 async function openBoard(id) {
   await flushSave();
@@ -788,7 +851,7 @@ async function openBoard(id) {
       }
     }, 20000);
   }
-  renderBoards(); renderLayers(); render();
+  renderBoards(); renderLayers(); renderTiers(); render();
 }
 async function newBoard(from) {
   await flushSave();
@@ -799,14 +862,14 @@ async function newBoard(from) {
   if (!SLOT_WIDTHS.includes(sw)) { toast('the box width must be 16, 24 or 32'); return; }
   const id = slug(name);
   const b = blankBoard(id, name.trim(), author, sw);
-  if (from) for (const L of LAYERS) b.layers[L] = new Map(from.layers[L]);
+  if (from) { for (const L of LAYERS) b.layers[L] = new Map(from.layers[L]); b.tiers = Object.assign({}, from.tiers || {}); }
   releaseLease();
   state.cur = b; state.readOnly = false; state.undo = []; state.redo = [];
   els.boardName.value = b.name; els.boardName.disabled = false; $('btnDelete').disabled = false;
   state.boards.set(id, {name: b.name, author, place: b.place, updatedAt: new Date().toISOString(), cells: 0});
   await saveNow();
   await takeLease(id);
-  renderBoards(); renderLayers(); render();
+  renderBoards(); renderLayers(); renderTiers(); render();
 }
 els.boardName.addEventListener('change', () => { if (state.cur && !state.readOnly) { state.cur.name = els.boardName.value.trim() || state.cur.name; els.boardName.value = state.cur.name; markDirty(); } });
 $('btnNew').addEventListener('click', () => newBoard(null));
@@ -818,7 +881,7 @@ $('btnDelete').addEventListener('click', async () => {
   clearTimeout(state.saveTimer); state.dirty = false;
   await deleteDoc(id);
   state.boards.delete(id); state.cur = null; releaseLease();
-  els.boardName.value = ''; renderBoards(); renderLayers(); render(); setStatus('deleted', '');
+  els.boardName.value = ''; renderBoards(); renderLayers(); renderTiers(); render(); setStatus('deleted', '');
   if (BUNDLED[id]) { state.boards.set(id, {name: BUNDLED[id].data.name, author: BUNDLED[id].data.author, place: BUNDLED[id].place, updatedAt: ''}); openBoard(id); }
 });
 
@@ -897,7 +960,7 @@ function onStoreChange(docs) {
     state.boards.set(d.id, {...(state.boards.get(d.id) || {}), name: m.name, author: m.author, place: m.place, slotW: Number(m.slot_w) || 16, updatedAt: m.updatedAt, cells: m.cells});
     // another editor's live changes to the board we are only watching
     if (state.cur && state.cur.id === d.id && state.readOnly && !d.pending) {
-      const b = docToBoard(d.id, m); state.cur.layers = b.layers; state.cur.name = b.name; els.boardName.value = b.name; render(); renderLayers();
+      const b = docToBoard(d.id, m); state.cur.layers = b.layers; state.cur.tiers = b.tiers; state.cur.name = b.name; els.boardName.value = b.name; render(); renderLayers(); renderTiers();
       setStatus('watching live - someone else is editing this board (changed ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'}) + ')', 'warn');
     }
   }
@@ -955,6 +1018,7 @@ $('btnImport').addEventListener('click', async () => {
   try { parsed = parseImport(els.importText.value); } catch (e) { toast(e.message); return; }
   const b = blankBoard('tmp', parsed.name, els.authorName.value.trim(), parsed.slotW || 16);
   for (const L of LAYERS) b.layers[L] = decodeLayer(parsed.layers[L]);
+  b.tiers = tiersOf(parsed.tiers);
   await newBoard(b);
   els.importText.value = '';
 });
@@ -963,6 +1027,8 @@ $('btnImport').addEventListener('click', async () => {
 $('toolPaint').addEventListener('click', () => { state.tool = 'paint'; syncTools(); });
 $('toolErase').addEventListener('click', () => { state.tool = 'erase'; syncTools(); });
 $('toolPick').addEventListener('click', () => { state.tool = 'pick'; syncTools(); });
+for (const t of ['green', 'yellow', 'red']) $('tier' + t[0].toUpperCase() + t.slice(1)).addEventListener('click', () => { state.tool = 'tag'; state.tier = t; syncTools(); render(); });
+$('tierClear').addEventListener('click', () => { state.tool = 'tag'; state.tier = null; syncTools(); render(); });
 $('btnUndo').addEventListener('click', undo); $('btnRedo').addEventListener('click', redo);
 $('flagH').addEventListener('click', () => { state.flags ^= FLIP_H; syncFlags(); updateStampInfo(); render(); });
 $('flagV').addEventListener('click', () => { state.flags ^= FLIP_V; syncFlags(); updateStampInfo(); render(); });
@@ -1092,7 +1158,7 @@ async function openPlace(pl) {
   state.cur = b; state.readOnly = false; state.undo = []; state.redo = []; state.dirty = false;
   els.boardName.value = b.name; els.boardName.disabled = false; $('btnDelete').disabled = true;
   setStatus('empty', '');
-  renderBoards(); renderLayers(); render();
+  renderBoards(); renderLayers(); renderTiers(); render();
 }
 function renderPlaces() {
   const nav = $('places'); nav.innerHTML = '';

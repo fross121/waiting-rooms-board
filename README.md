@@ -43,6 +43,15 @@ board at a time.
 
 The page then says "saved to the cloud" after each change.
 
+## Room difficulty
+
+**Room difficulty** (left panel) tags a room green, yellow or red: pick a
+colour, click the room on the board; right-click or **Clear** takes the tag
+off. The board shows a tagged room in its colour and lists the tagged rooms
+by colour under the buttons. Tags save with the board and travel in the
+downloaded `.json` (`tiers`, room number to colour). For now they are a
+label only: the game reads past them.
+
 ## The artist's sheets
 
 **Add sheet** turns a PNG into a new tile sheet (every cell with paint in it

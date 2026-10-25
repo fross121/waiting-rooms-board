@@ -211,7 +211,11 @@ function slotW() { return state.cur && state.cur.slotW ? state.cur.slotW : 16; }
 function boardCols() { return 8 * slotW() + 1; }
 const ZOOMS = [2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256];
 // THE PLACES a level can be: one page of boards each. Add a name here to add a page.
-const PLACES = ['Hospital', 'Police station', 'Construction site', 'Military base', "Willbee's", 'School', 'Port', 'Housing', 'Tutorial'];
+// The first nine are the game's map destinations (world_map.gd KINDS, spelled the
+// same): the game deals each from the boards on its page alone. The rest are
+// pages of their own that the map does not deal yet.
+const PLACES = ['Hospital', 'Car park', 'Fuel station', 'Diner', 'Hotel', 'Clothes shop', 'Crashed car', 'City', 'Fallout zone',
+  'Police station', 'Construction site', 'Military base', "Willbee's", 'School', 'Port', 'Housing', 'Tutorial'];
 // the game's own boards, shipped with the page: shown on their page until someone saves a change to them
 const BUNDLED = {'main-board': {place: 'Hospital', data: window.MAIN_BOARD}, 'tutorial-board': {place: 'Tutorial', data: window.TUTORIAL_BOARD}};
 const MAIN_ID = 'main-board';
